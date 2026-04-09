@@ -5,6 +5,12 @@ $method = $_SERVER['REQUEST_METHOD'];
 $db     = getDB();
 
 if ($method === 'GET') {
+    // Verificar si piden inventario de madera
+    if (isset($_GET['madera'])) {
+        $stmt = $db->query("SELECT * FROM inventario_madera");
+        json_response($stmt->fetchAll());
+    }
+    // Inventario general
     $stmt = $db->query("SELECT * FROM v_inventario");
     json_response($stmt->fetchAll());
 }
@@ -31,11 +37,6 @@ if ($method === 'PUT') {
        ->execute([$tipo, $antes, $stock_actual, $usuario_id]);
 
     json_response(['success' => true]);
-}
-
-if ($method === 'GET' && isset($_GET['madera'])) {
-    $stmt = $db->query("SELECT * FROM inventario_madera");
-    json_response($stmt->fetchAll());
 }
 
 json_response(['error' => 'Método no permitido'], 405);
