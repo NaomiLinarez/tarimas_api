@@ -1,5 +1,10 @@
-:8080
+{
+    frankenphp
+    admin off
+}
 
-root * /app
-php_fastcgi localhost:9000
-file_server
+:8080 {
+    root * /app
+    encode gzip
+    php_server
+}

@@ -1,13 +1,12 @@
-FROM dunglas/frankenphp:latest-php8.2
+FROM dunglas/frankenphp:latest-php8.3-alpine
 
-RUN docker-php-ext-install mysqli pdo pdo_mysql
+# Extensiones MySQL
+RUN install-php-extensions pdo_mysql mysqli
 
 WORKDIR /app
 
 COPY . .
 
-COPY Caddyfile /etc/caddy/Caddyfile
-
 EXPOSE 8080
 
-CMD ["frankenphp", "run", "--config", "/etc/caddy/Caddyfile"]
+CMD ["frankenphp", "run", "--config", "/app/Caddyfile"]
