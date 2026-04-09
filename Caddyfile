@@ -1,0 +1,5 @@
+:8080
+
+root * /app
+php_fastcgi localhost:9000
+file_server
