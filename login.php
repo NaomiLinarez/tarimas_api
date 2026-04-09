@@ -1,16 +1,5 @@
 <?php
-/**
- * login.php — Autenticación de usuarios.
- *
- * POST /login.php
- * Body: { "usuario": "...", "password": "..." }
- *
- * Respuesta exitosa:
- * {
- *   "success": true,
- *   "usuario": { "id", "nombre", "usuario", "rol" }
- * }
- */
+
 
 require_once 'config.php';
 require_method('POST');
@@ -48,6 +37,6 @@ json_response([
         'id'      => $user['id'],
         'nombre'  => $user['nombre'],
         'usuario' => $user['usuario'],
-        'rol'     => $user['rol'] ?? 'cajero',
+        'rol'     => $user['rol'] ?? 'usuario',
     ],
 ]);
