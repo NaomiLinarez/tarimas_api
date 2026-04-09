@@ -1,19 +1,7 @@
 <?php
 /**
  * registro.php — Creación de nuevos usuarios.
- *
- * POST /registro.php
- * Body: {
- *   "nombre":   "Juan Pérez",
- *   "usuario":  "juanp",
- *   "password": "contraseña123"
- * }
- *
  * El rol siempre se crea como "usuario_normal".
- * Solo un admin puede crear otros admins directamente en BD.
- *
- * Respuesta exitosa:
- * { "success": true, "usuario_id": "uuid" }
  */
 
 require_once 'config.php';
@@ -24,28 +12,31 @@ $nombre   = trim($data['nombre']   ?? '');
 $usuario  = trim($data['usuario']  ?? '');
 $password = trim($data['password'] ?? '');
 
-// El rol siempre es usuario_normal al registrarse desde la app
+// Rol fijo — el cliente no puede escoger su propio rol
 $rol = 'usuario_normal';
 
-// ── Validaciones ─────────────────────────────────────────────────────────────
-
+// ── Validaciones ──────────────────────────────────────────────────────────────
 if ($nombre === '' || $usuario === '' || $password === '') {
-    json_response(['error' => 'nombre, usuario y password son requeridos'], 400);
+    json_response(['error' => 'Todos los campos son requeridos'], 400);
 }
-
 if (strlen($password) < 6) {
     json_response(['error' => 'La contraseña debe tener al menos 6 caracteres'], 400);
 }
-
-// Solo letras, números y guion bajo para el nombre de usuario
 if (!preg_match('/^[a-zA-Z0-9_]{3,30}$/', $usuario)) {
     json_response(['error' => 'El usuario solo puede tener letras, números y _ (3–30 caracteres)'], 400);
 }
 
 $db = getDB();
 
-// ── Verificar que el usuario no exista ───────────────────────────────────────
+// ── Asegurarse de que la columna rol acepte usuario_normal y admin ────────────
+// (Ejecutar solo si es necesario — idempotente)
+try {
+    $db->exec("ALTER TABLE usuarios MODIFY COLUMN rol ENUM('admin','usuario_normal') NOT NULL DEFAULT 'usuario_normal'");
+} catch (\Throwable $e) {
+    // Si ya está bien o no es un ENUM, continuar sin interrumpir
+}
 
+// ── Verificar usuario único ───────────────────────────────────────────────────
 $stmt = $db->prepare('SELECT id FROM usuarios WHERE usuario = ? LIMIT 1');
 $stmt->execute([$usuario]);
 if ($stmt->fetch()) {
@@ -53,7 +44,6 @@ if ($stmt->fetch()) {
 }
 
 // ── Crear usuario ─────────────────────────────────────────────────────────────
-
 $id            = uuid4();
 $password_hash = password_hash($password, PASSWORD_BCRYPT);
 
