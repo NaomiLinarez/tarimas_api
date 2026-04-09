@@ -1,42 +1,53 @@
 <?php
-/**
- * precios.php — Consulta y actualización de precios.
- *
- * GET /precios.php → Lista precios de todos los tipos
- * PUT /precios.php → Actualiza precio de un tipo
- */
+
 
 require_once 'config.php';
-require_method('GET', 'PUT');
+require_method('POST');
 
-$method = $_SERVER['REQUEST_METHOD'];
-$db     = getDB();
+$data     = get_input();
+$nombre   = trim($data['nombre']   ?? '');
+$usuario  = trim($data['usuario']  ?? '');
+$password = trim($data['password'] ?? '');
+$rol      = trim($data['rol']      ?? 'usuario');
 
-if ($method === 'GET') {
-    $stmt = $db->query('SELECT tipo, precio_unit, actualizado_en FROM precios ORDER BY tipo');
-    json_response($stmt->fetchAll());
+// ── Validaciones ─────────────────────────────────────────────────────────────
+
+if ($nombre === '' || $usuario === '' || $password === '') {
+    json_response(['error' => 'nombre, usuario y password son requeridos'], 400);
 }
 
-if ($method === 'PUT') {
-    $data       = get_input();
-    $tipo       = trim($data['tipo']        ?? '');
-    $precio     = $data['precio_unit']      ?? null;
-    $usuario_id = $data['usuario_id']       ?? null;
-
-    if ($tipo === '' || $precio === null) {
-        json_response(['error' => 'tipo y precio_unit son requeridos'], 400);
-    }
-
-    if (!is_numeric($precio) || (float) $precio <= 0) {
-        json_response(['error' => 'precio_unit debe ser un número mayor a 0'], 400);
-    }
-
-    $stmt = $db->prepare('UPDATE precios SET precio_unit = ?, actualizado_por = ? WHERE tipo = ?');
-    $stmt->execute([(float) $precio, $usuario_id, $tipo]);
-
-    if ($stmt->rowCount() === 0) {
-        json_response(['error' => 'Tipo de producto no encontrado'], 404);
-    }
-
-    json_response(['success' => true]);
+if (strlen($password) < 6) {
+    json_response(['error' => 'La contraseña debe tener al menos 6 caracteres'], 400);
 }
+
+$rolesPermitidos = ['admin', 'usuario'];
+if (!in_array($rol, $rolesPermitidos, true)) {
+    json_response(['error' => 'Rol no válido. Usa: admin o usuario'], 400);
+}
+
+// Solo letras, números y guion bajo para el nombre de usuario
+if (!preg_match('/^[a-zA-Z0-9_]{3,30}$/', $usuario)) {
+    json_response(['error' => 'El usuario solo puede tener letras, números y _ (3–30 caracteres)'], 400);
+}
+
+$db = getDB();
+
+// ── Verificar que el usuario no exista ───────────────────────────────────────
+
+$stmt = $db->prepare('SELECT id FROM usuarios WHERE usuario = ? LIMIT 1');
+$stmt->execute([$usuario]);
+if ($stmt->fetch()) {
+    json_response(['error' => 'Ese nombre de usuario ya está en uso'], 409);
+}
+
+// ── Crear usuario ─────────────────────────────────────────────────────────────
+
+$id            = uuid4();
+$password_hash = password_hash($password, PASSWORD_BCRYPT);
+
+$db->prepare(
+    'INSERT INTO usuarios (id, nombre, usuario, password_hash, rol, activo, creado_en)
+     VALUES (?, ?, ?, ?, ?, 1, NOW())'
+)->execute([$id, $nombre, $usuario, $password_hash, $rol]);
+
+json_response(['success' => true, 'usuario_id' => $id], 201);
