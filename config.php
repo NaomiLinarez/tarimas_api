@@ -15,7 +15,7 @@ function getDB() {
         return $pdo;
     } catch (PDOException $e) {
         http_response_code(500);
- echo json_encode(['error' => $e->getMessage()]); // en lugar del mensaje genérico
+        echo json_encode(['error' => $e->getMessage()]);
         exit;
     }
 }
@@ -37,3 +37,11 @@ header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(200); exit; }
 
+// PRUEBA TEMPORAL - borrar después
+try {
+    getDB();
+    echo json_encode(['status' => 'Conexión exitosa']);
+} catch (Exception $e) {
+    echo json_encode(['error' => $e->getMessage()]);
+}
+exit;
