@@ -6,9 +6,11 @@
  * Body: {
  *   "nombre":   "Juan Pérez",
  *   "usuario":  "juanp",
- *   "password": "contraseña123",
- *   "rol":      "cajero"   // opcional, default: cajero
+ *   "password": "contraseña123"
  * }
+ *
+ * El rol siempre se crea como "usuario_normal".
+ * Solo un admin puede crear otros admins directamente en BD.
  *
  * Respuesta exitosa:
  * { "success": true, "usuario_id": "uuid" }
@@ -21,7 +23,9 @@ $data     = get_input();
 $nombre   = trim($data['nombre']   ?? '');
 $usuario  = trim($data['usuario']  ?? '');
 $password = trim($data['password'] ?? '');
-$rol      = trim($data['rol']      ?? 'cajero');
+
+// El rol siempre es usuario_normal al registrarse desde la app
+$rol = 'usuario_normal';
 
 // ── Validaciones ─────────────────────────────────────────────────────────────
 
@@ -31,11 +35,6 @@ if ($nombre === '' || $usuario === '' || $password === '') {
 
 if (strlen($password) < 6) {
     json_response(['error' => 'La contraseña debe tener al menos 6 caracteres'], 400);
-}
-
-$rolesPermitidos = ['admin', 'cajero', 'vendedor'];
-if (!in_array($rol, $rolesPermitidos, true)) {
-    json_response(['error' => 'Rol no válido. Usa: admin, cajero o vendedor'], 400);
 }
 
 // Solo letras, números y guion bajo para el nombre de usuario

@@ -37,6 +37,6 @@ json_response([
         'id'      => $user['id'],
         'nombre'  => $user['nombre'],
         'usuario' => $user['usuario'],
-        'rol'     => $user['rol'] ?? 'usuario',
+        'rol'     => $user['rol'] ?? 'usuario_normal',
     ],
 ]);
