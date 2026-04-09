@@ -1,11 +1,9 @@
-FROM php:8.2-cli
+FROM dunglas/frankenphp:latest-php8.2
 
-RUN docker-php-ext-install pdo pdo_mysql
+RUN docker-php-ext-install mysqli pdo_mysql
 
-WORKDIR /var/www/html
+COPY . /app/public
 
-COPY . .
+ENV SERVER_NAME=:${PORT:-8080}
 
 EXPOSE 8080
-
-CMD ["php", "-S", "0.0.0.0:8080"]
