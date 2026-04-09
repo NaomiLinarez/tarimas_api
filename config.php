@@ -1,12 +1,5 @@
 <?php
-/**
- * config.php — Configuración central de la API de Tarimas Tovar.
- *
- * Mejoras:
- *  - Eliminada la prueba temporal de conexión que contaminaba todas las respuestas.
- *  - Añadido helper require_method() para validar verbos HTTP de forma limpia.
- *  - CORS centralizado una sola vez aquí.
- */
+
 
 define('DB_HOST',     getenv('MYSQLHOST'));
 define('DB_PORT',     getenv('MYSQLPORT')     ?: '3306');
@@ -14,7 +7,7 @@ define('DB_NAME',     getenv('MYSQLDATABASE') ?: getenv('MYSQL_DATABASE'));
 define('DB_USER',     getenv('MYSQLUSER'));
 define('DB_PASSWORD', getenv('MYSQLPASSWORD'));
 
-// ── CORS (se aplica una sola vez en este archivo central) ────────────────────
+
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
@@ -25,7 +18,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-// ── Conexión PDO ─────────────────────────────────────────────────────────────
+
 
 function getDB(): PDO {
     static $pdo = null;
@@ -47,7 +40,7 @@ function getDB(): PDO {
     }
 }
 
-// ── Respuesta JSON ────────────────────────────────────────────────────────────
+
 
 function json_response(array $data, int $code = 200): never {
     http_response_code($code);
@@ -55,14 +48,14 @@ function json_response(array $data, int $code = 200): never {
     exit;
 }
 
-// ── Leer cuerpo JSON del request ──────────────────────────────────────────────
+
 
 function get_input(): array {
     $raw = file_get_contents('php://input');
     return json_decode($raw, true) ?? [];
 }
 
-// ── Validar método HTTP ───────────────────────────────────────────────────────
+
 
 function require_method(string ...$allowed): void {
     if (!in_array($_SERVER['REQUEST_METHOD'], $allowed, true)) {
@@ -70,7 +63,7 @@ function require_method(string ...$allowed): void {
     }
 }
 
-// ── Generar UUID v4 ───────────────────────────────────────────────────────────
+
 
 function uuid4(): string {
     $data = random_bytes(16);
