@@ -1,11 +1,5 @@
 <?php
-/**
- * ventas.php — Registro y consulta de ventas.
- *
- * GET  /ventas.php                   → Ventas de hoy
- * GET  /ventas.php?fecha=YYYY-MM-DD  → Ventas de una fecha
- * POST /ventas.php                   → Registrar nueva venta
- */
+
 
 require_once 'config.php';
 require_method('GET', 'POST');
