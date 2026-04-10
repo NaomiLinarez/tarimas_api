@@ -72,6 +72,25 @@ if ($method === 'POST') {
         }
     }
 
+    // ── Verificar stock antes de iniciar la transacción ─────────────────────────
+    $stmtCheckStock = $db->prepare('SELECT stock_actual FROM inventario WHERE tipo = ?');
+    foreach ($detalle as $item) {
+        $stmtCheckStock->execute([$item['tipo']]);
+        $stockDisponible = (int) $stmtCheckStock->fetchColumn();
+        $cantSolicitada  = (int) $item['cantidad'];
+        if ($stockDisponible < $cantSolicitada) {
+            $label = match($item['tipo']) {
+                'tarima_nueva' => 'Tarima nueva',
+                'reparacion'   => 'Reparación',
+                'especial'     => 'Medida especial',
+                default        => $item['tipo'],
+            };
+            json_response([
+                'error' => "Stock insuficiente de {$label}. Disponibles: {$stockDisponible}, solicitados: {$cantSolicitada}"
+            ], 409);
+        }
+    }
+
     $db->beginTransaction();
     try {
         $venta_id = uuid4();
