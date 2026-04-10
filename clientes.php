@@ -2,9 +2,10 @@
 /**
  * clientes.php — Gestión de clientes.
  *
- * GET  /clientes.php      → Lista todos los clientes activos
- * GET  /clientes.php?q=X  → Búsqueda por nombre
- * POST /clientes.php      → Crear cliente
+ * GET  /clientes.php              → Lista todos los clientes activos
+ * GET  /clientes.php?q=X          → Búsqueda por nombre
+ * GET  /clientes.php?pedidos=1&id=UUID  → Pedidos de un cliente específico
+ * POST /clientes.php              → Crear cliente
  */
 
 require_once 'config.php';
@@ -16,6 +17,99 @@ $db     = getDB();
 // ── GET ───────────────────────────────────────────────────────────────────────
 
 if ($method === 'GET') {
+
+    // Pedidos de un cliente: GET /clientes.php?pedidos=1&id=UUID
+    if (isset($_GET['pedidos'])) {
+        $cliente_id = trim($_GET['id'] ?? '');
+        $nombre     = trim($_GET['nombre'] ?? '');
+
+        if ($cliente_id === '' && $nombre === '') {
+            json_response(['error' => 'Se requiere id o nombre del cliente'], 400);
+        }
+
+        if ($cliente_id !== '') {
+            // Buscar info del cliente
+            $stmtCliente = $db->prepare(
+                'SELECT id, nombre, telefono, direccion FROM clientes WHERE id = ? AND activo = 1 LIMIT 1'
+            );
+            $stmtCliente->execute([$cliente_id]);
+            $cliente = $stmtCliente->fetch();
+
+            if (!$cliente) {
+                json_response(['error' => 'Cliente no encontrado'], 404);
+            }
+
+            // Pedidos en ventas por cliente_id
+            $stmtPedidos = $db->prepare("
+                SELECT v.id,
+                       v.nombre_cliente,
+                       v.total,
+                       v.metodo_pago,
+                       v.estado_pago,
+                       v.medida_especial,
+                       v.tipo_reparacion,
+                       v.creado_en,
+                       GROUP_CONCAT(
+                           CONCAT(dv.tipo, ':', dv.cantidad, ':', dv.precio_unit)
+                           ORDER BY dv.tipo
+                           SEPARATOR '|'
+                       ) AS detalle
+                  FROM ventas v
+                  LEFT JOIN detalle_ventas dv ON dv.venta_id = v.id
+                 WHERE v.cliente_id = ?
+                 GROUP BY v.id
+                 ORDER BY v.creado_en DESC
+                 LIMIT 200
+            ");
+            $stmtPedidos->execute([$cliente_id]);
+            $pedidos = $stmtPedidos->fetchAll();
+
+            json_response([
+                'cliente' => $cliente,
+                'pedidos' => $pedidos,
+                'total_pedidos' => count($pedidos),
+            ]);
+        }
+
+        // Buscar por nombre (fallback)
+        $stmtCliente = $db->prepare(
+            'SELECT id, nombre, telefono, direccion FROM clientes WHERE nombre LIKE ? AND activo = 1 LIMIT 1'
+        );
+        $stmtCliente->execute(['%' . $nombre . '%']);
+        $cliente = $stmtCliente->fetch();
+
+        $stmtPedidos = $db->prepare("
+            SELECT v.id,
+                   v.nombre_cliente,
+                   v.total,
+                   v.metodo_pago,
+                   v.estado_pago,
+                   v.medida_especial,
+                   v.tipo_reparacion,
+                   v.creado_en,
+                   GROUP_CONCAT(
+                       CONCAT(dv.tipo, ':', dv.cantidad, ':', dv.precio_unit)
+                       ORDER BY dv.tipo
+                       SEPARATOR '|'
+                   ) AS detalle
+              FROM ventas v
+              LEFT JOIN detalle_ventas dv ON dv.venta_id = v.id
+             WHERE v.nombre_cliente LIKE ?
+             GROUP BY v.id
+             ORDER BY v.creado_en DESC
+             LIMIT 200
+        ");
+        $stmtPedidos->execute(['%' . $nombre . '%']);
+        $pedidos = $stmtPedidos->fetchAll();
+
+        json_response([
+            'cliente' => $cliente ?: ['nombre' => $nombre],
+            'pedidos' => $pedidos,
+            'total_pedidos' => count($pedidos),
+        ]);
+    }
+
+    // Búsqueda normal de clientes
     $buscar = trim($_GET['q'] ?? '');
 
     if ($buscar !== '') {
