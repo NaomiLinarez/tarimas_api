@@ -1,53 +1,56 @@
 <?php
-
+/**
+ * precios.php — Consulta y actualización de precios por tipo de tarima.
+ *
+ * GET /precios.php         → Lista todos los precios
+ * PUT /precios.php         → Actualiza precio de un tipo
+ */
 
 require_once 'config.php';
-require_method('POST');
+require_method('GET', 'PUT');
 
-$data     = get_input();
-$nombre   = trim($data['nombre']   ?? '');
-$usuario  = trim($data['usuario']  ?? '');
-$password = trim($data['password'] ?? '');
-$rol      = trim($data['rol']      ?? 'usuario');
+$method = $_SERVER['REQUEST_METHOD'];
+$db     = getDB();
 
-// ── Validaciones ─────────────────────────────────────────────────────────────
+// Tipos de tarima válidos
+$tiposValidos = [
+    'tarima_nueva',
+    'estandar',
+    'encachetada',
+    'barrote',
+    'tacon',
+    'especial',
+    'reparacion',
+];
 
-if ($nombre === '' || $usuario === '' || $password === '') {
-    json_response(['error' => 'nombre, usuario y password son requeridos'], 400);
+if ($method === 'GET') {
+    $stmt = $db->query('SELECT tipo, precio_unit FROM precios ORDER BY tipo');
+    json_response($stmt->fetchAll());
 }
 
-if (strlen($password) < 6) {
-    json_response(['error' => 'La contraseña debe tener al menos 6 caracteres'], 400);
+if ($method === 'PUT') {
+    $data       = get_input();
+    $tipo       = trim($data['tipo']       ?? '');
+    $precio     = $data['precio_unit']     ?? null;
+    $usuario_id = $data['usuario_id']      ?? null;
+
+    if ($tipo === '' || $precio === null) {
+        json_response(['error' => 'tipo y precio_unit son requeridos'], 400);
+    }
+
+    if (!is_numeric($precio) || (float)$precio < 0) {
+        json_response(['error' => 'precio_unit debe ser un número mayor o igual a 0'], 400);
+    }
+
+    // Verificar que el tipo exista
+    $stmt = $db->prepare('SELECT tipo FROM precios WHERE tipo = ?');
+    $stmt->execute([$tipo]);
+    if (!$stmt->fetch()) {
+        json_response(['error' => "Tipo '$tipo' no encontrado en precios"], 404);
+    }
+
+    $db->prepare('UPDATE precios SET precio_unit = ? WHERE tipo = ?')
+       ->execute([(float)$precio, $tipo]);
+
+    json_response(['success' => true]);
 }
-
-$rolesPermitidos = ['admin', 'usuario'];
-if (!in_array($rol, $rolesPermitidos, true)) {
-    json_response(['error' => 'Rol no válido. Usa: admin o usuario'], 400);
-}
-
-// Solo letras, números y guion bajo para el nombre de usuario
-if (!preg_match('/^[a-zA-Z0-9_]{3,30}$/', $usuario)) {
-    json_response(['error' => 'El usuario solo puede tener letras, números y _ (3–30 caracteres)'], 400);
-}
-
-$db = getDB();
-
-// ── Verificar que el usuario no exista ───────────────────────────────────────
-
-$stmt = $db->prepare('SELECT id FROM usuarios WHERE usuario = ? LIMIT 1');
-$stmt->execute([$usuario]);
-if ($stmt->fetch()) {
-    json_response(['error' => 'Ese nombre de usuario ya está en uso'], 409);
-}
-
-// ── Crear usuario ─────────────────────────────────────────────────────────────
-
-$id            = uuid4();
-$password_hash = password_hash($password, PASSWORD_BCRYPT);
-
-$db->prepare(
-    'INSERT INTO usuarios (id, nombre, usuario, password_hash, rol, activo, creado_en)
-     VALUES (?, ?, ?, ?, ?, 1, NOW())'
-)->execute([$id, $nombre, $usuario, $password_hash, $rol]);
-
-json_response(['success' => true, 'usuario_id' => $id], 201);

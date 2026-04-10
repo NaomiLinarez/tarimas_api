@@ -17,12 +17,14 @@
 require_once 'config.php';
 require_method('POST');
 
-$data    = get_input();
-$titulo  = trim($data['titulo']   ?? '🛒 Nuevo pedido');
-$cuerpo  = trim($data['cuerpo']   ?? 'Se registró un nuevo pedido');
-$ventaId = trim($data['venta_id'] ?? '');
-$tipo    = trim($data['tipo']     ?? 'nuevo_pedido');
-$destino = trim($data['destino']  ?? 'admin');
+$data           = get_input();
+$titulo         = trim($data['titulo']          ?? '🛒 Nuevo pedido');
+$cuerpo         = trim($data['cuerpo']          ?? 'Se registró un nuevo pedido');
+$ventaId        = trim($data['venta_id']        ?? '');
+$tipo           = trim($data['tipo']            ?? 'nuevo_pedido');
+$destino        = trim($data['destino']         ?? 'admin');
+$medidaEspecial = trim($data['medida_especial'] ?? '');
+$tipoReparacion = trim($data['tipo_reparacion'] ?? '');
 
 if ($destino !== 'admin') {
     json_response(['error' => 'destino no válido'], 400);
@@ -61,10 +63,12 @@ $payload = [
         'sound' => 'default',
     ],
     'data' => [
-        'tipo'     => $tipo,
-        'venta_id' => $ventaId,
-        'titulo'   => $titulo,
-        'cuerpo'   => $cuerpo,
+        'tipo'            => $tipo,
+        'venta_id'        => $ventaId,
+        'titulo'          => $titulo,
+        'cuerpo'          => $cuerpo,
+        'medida_especial' => $medidaEspecial,
+        'tipo_reparacion' => $tipoReparacion,
     ],
     'priority' => 'high',
 ];
