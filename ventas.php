@@ -48,13 +48,6 @@ try {
         activo    TINYINT(1) NOT NULL DEFAULT 1,
         creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )");
-
-    // ✅ FIX CRÍTICO: Convertir ENUM a VARCHAR INMEDIATAMENTE, de forma individual y garantizada
-    // Esto resuelve el SQLSTATE[01000] Warning 1265 Data truncated for column 'tipo'
-    try { $db->exec("ALTER TABLE historial_inventario MODIFY COLUMN tipo VARCHAR(50) NOT NULL"); } catch (\Throwable $e) { error_log('alter tipo: ' . $e->getMessage()); }
-    try { $db->exec("ALTER TABLE historial_inventario MODIFY COLUMN motivo VARCHAR(100) NOT NULL DEFAULT 'ajuste_manual'"); } catch (\Throwable $e) { error_log('alter motivo: ' . $e->getMessage()); }
-
-    // Vista para ventas de hoy
     $db->exec("CREATE OR REPLACE VIEW v_ventas_hoy AS
         SELECT v.*, GROUP_CONCAT(CONCAT(dv.tipo,':',dv.cantidad,':',dv.precio_unit) SEPARATOR '|') AS detalle
           FROM ventas v
@@ -62,14 +55,6 @@ try {
          WHERE DATE(v.creado_en) = CURDATE()
          GROUP BY v.id
          ORDER BY v.creado_en DESC");
-
-    // Migraciones para columnas opcionales
-    foreach ([
-        "ALTER TABLE ventas ADD COLUMN medida_especial VARCHAR(100) DEFAULT '' AFTER registrada_por",
-        "ALTER TABLE ventas ADD COLUMN tipo_reparacion VARCHAR(100) DEFAULT '' AFTER medida_especial",
-    ] as $alterSql) {
-        try { $db->exec($alterSql); } catch (\Throwable $ignored) {}
-    }
 } catch (\Throwable $e) { error_log('ventas init: ' . $e->getMessage()); }
 
 // ── GET ───────────────────────────────────────────────────────────────────────
@@ -152,7 +137,6 @@ if ($method === 'POST') {
     if ($nombre_cliente === '') {
         json_response(['error' => 'nombre_cliente es requerido'], 400);
     }
-
     foreach ($detalle as $i => $item) {
         if (empty($item['tipo']) || empty($item['cantidad']) || !isset($item['precio_unit'])) {
             json_response(['error' => "Item $i: tipo, cantidad y precio_unit son requeridos"], 400);
@@ -181,9 +165,13 @@ if ($method === 'POST') {
     try {
         $stmtCheckStock = $db->prepare('SELECT stock_actual FROM inventario WHERE tipo = ?');
         $labels = [
-            'tarima_nueva'=>'Tarima nueva','estandar'=>'Tarima estándar',
-            'encachetada'=>'Tarima encachetada','barrote'=>'Tarima de barrote',
-            'tacon'=>'Tarima de tacón','especial'=>'Medida especial','reparacion'=>'Reparación',
+            'tarima_nueva' => 'Tarima nueva',
+            'estandar'     => 'Tarima estándar',
+            'encachetada'  => 'Tarima encachetada',
+            'barrote'      => 'Tarima de barrote',
+            'tacon'        => 'Tarima de tacón',
+            'especial'     => 'Medida especial',
+            'reparacion'   => 'Reparación',
         ];
         foreach ($detalle as $item) {
             $stmtCheckStock->execute([$item['tipo']]);
@@ -206,22 +194,10 @@ if ($method === 'POST') {
     try {
         $venta_id = uuid4();
 
-        // Detectar qué columnas opcionales existen para no fallar si la DB es antigua
-        $colsExist = [];
-        try {
-            $colCheck = $db->query("SHOW COLUMNS FROM ventas LIKE 'medida_especial'");
-            if ($colCheck && $colCheck->rowCount() > 0) $colsExist[] = 'medida_especial';
-            $colCheck2 = $db->query("SHOW COLUMNS FROM ventas LIKE 'tipo_reparacion'");
-            if ($colCheck2 && $colCheck2->rowCount() > 0) $colsExist[] = 'tipo_reparacion';
-        } catch (\Throwable $ignored) {}
-
-        $cols         = 'id, cliente_id, nombre_cliente, total, metodo_pago, monto_recibido, estado_pago, registrada_por';
-        $placeholders = '?, ?, ?, ?, ?, ?, ?, ?';
-        $vals         = [$venta_id, $cliente_id, $nombre_cliente, $total, $metodo_pago, $monto_recibido, $estado_pago, $registrada_por];
-        if (in_array('medida_especial', $colsExist)) { $cols .= ', medida_especial'; $placeholders .= ', ?'; $vals[] = $medida_especial; }
-        if (in_array('tipo_reparacion', $colsExist)) { $cols .= ', tipo_reparacion'; $placeholders .= ', ?'; $vals[] = $tipo_reparacion; }
-
-        $db->prepare("INSERT INTO ventas ($cols) VALUES ($placeholders)")->execute($vals);
+        $db->prepare("
+            INSERT INTO ventas (id, cliente_id, nombre_cliente, total, metodo_pago, monto_recibido, estado_pago, registrada_por, medida_especial, tipo_reparacion)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ")->execute([$venta_id, $cliente_id, $nombre_cliente, $total, $metodo_pago, $monto_recibido, $estado_pago, $registrada_por, $medida_especial, $tipo_reparacion]);
 
         $stmtDetalle   = $db->prepare('INSERT INTO detalle_ventas (venta_id, tipo, cantidad, precio_unit) VALUES (?, ?, ?, ?)');
         $stmtStock     = $db->prepare('SELECT stock_actual FROM inventario WHERE tipo = ?');
@@ -236,12 +212,7 @@ if ($method === 'POST') {
                 $stock_antes = (int) $stockRow['stock_actual'];
                 $stock_nuevo = max(0, $stock_antes - (int)$item['cantidad']);
                 $stmtUpdate->execute([$stock_nuevo, $item['tipo']]);
-                try {
-                    $tipoHistorial = substr((string)$item['tipo'], 0, 50);
-                    $stmtHistorial->execute([$tipoHistorial, $stock_antes, $stock_nuevo, $venta_id, $registrada_por]);
-                } catch (\Throwable $ignored) {
-                    error_log('historial skip: ' . ($ignored->getMessage() ?? ''));
-                }
+                $stmtHistorial->execute([$item['tipo'], $stock_antes, $stock_nuevo, $venta_id, $registrada_por]);
             }
         }
 
@@ -267,7 +238,6 @@ if ($method === 'DELETE') {
     }
     $db->beginTransaction();
     try {
-        // Restaurar stock
         $stmtDet = $db->prepare('SELECT tipo, cantidad FROM detalle_ventas WHERE venta_id = ?');
         $stmtDet->execute([$venta_id]);
         $items = $stmtDet->fetchAll();
