@@ -41,7 +41,7 @@ if (!$projectId) {
 // ── Obtener tokens FCM de todos los admins activos ────────────────────────────
 $db   = getDB();
 
-// Crear tabla si no existe
+// Crear tablas si no existen
 try {
     $db->exec("CREATE TABLE IF NOT EXISTS fcm_tokens (
         id          CHAR(36)    NOT NULL PRIMARY KEY,
@@ -54,6 +54,30 @@ try {
         UNIQUE KEY uq_token (token(255)),
         INDEX idx_usuario (usuario_id)
     )");
+    // Tabla para historial + conteo de notificaciones no leídas
+    $db->exec("CREATE TABLE IF NOT EXISTS admin_notificaciones (
+        id         CHAR(36)     NOT NULL PRIMARY KEY,
+        tipo       VARCHAR(50)  NOT NULL DEFAULT 'nuevo_pedido',
+        titulo     VARCHAR(200) NOT NULL DEFAULT '',
+        cuerpo     TEXT         NOT NULL,
+        venta_id   VARCHAR(36)  DEFAULT NULL,
+        leida      TINYINT(1)   NOT NULL DEFAULT 0,
+        creado_en  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_leida (leida)
+    )");
+} catch (\Throwable $e) {}
+
+// ── Guardar notificación en historial ────────────────────────────────────────
+try {
+    $db->prepare("INSERT INTO admin_notificaciones (id, tipo, titulo, cuerpo, venta_id) VALUES (?, ?, ?, ?, ?)")
+       ->execute([uuid4(), $tipo, $titulo, $cuerpo, $ventaId !== '' ? $ventaId : null]);
+} catch (\Throwable $e) { error_log('guardar notif: ' . $e->getMessage()); }
+
+// Conteo de notificaciones no leídas (para el badge)
+$badgeCount = 0;
+try {
+    $r = $db->query("SELECT COUNT(*) FROM admin_notificaciones WHERE leida = 0");
+    $badgeCount = (int) $r->fetchColumn();
 } catch (\Throwable $e) {}
 
 $stmt = $db->prepare("
@@ -136,12 +160,22 @@ foreach ($tokens as $token) {
                 'venta_id'        => $ventaId,
                 'medida_especial' => $medidaEspecial,
                 'tipo_reparacion' => $tipoReparacion,
+                'badge'           => (string) $badgeCount,
             ],
             'android' => [
                 'priority' => 'high',
                 'notification' => [
                     'sound'        => 'default',
                     'click_action' => 'FLUTTER_NOTIFICATION_CLICK',
+                    'notification_count' => $badgeCount,
+                ],
+            ],
+            'apns' => [
+                'payload' => [
+                    'aps' => [
+                        'badge' => $badgeCount,
+                        'sound' => 'default',
+                    ],
                 ],
             ],
         ],
