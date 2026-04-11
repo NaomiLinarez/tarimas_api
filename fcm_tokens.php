@@ -45,6 +45,22 @@ if (!in_array($plataforma, ['android', 'ios'], true)) {
 
 $db = getDB();
 
+// Asegurar que la tabla exista con estructura correcta
+try {
+    $db->exec("CREATE TABLE IF NOT EXISTS fcm_tokens (
+        id          VARCHAR(36)  NOT NULL PRIMARY KEY,
+        usuario_id  VARCHAR(36)  NOT NULL,
+        token       TEXT         NOT NULL,
+        plataforma  VARCHAR(10)  NOT NULL DEFAULT 'android',
+        activo      TINYINT(1)   NOT NULL DEFAULT 1,
+        creado_en   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        actualizado DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_token (token(255)),
+        INDEX idx_usuario (usuario_id)
+    )");
+} catch (\Throwable $ignored) {}
+
+
 // ── Upsert: insertar o actualizar si el token ya existe ──────────────────────
 // Esto maneja el caso donde el mismo dispositivo se re-registra o cambia de usuario.
 
