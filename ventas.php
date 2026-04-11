@@ -1,18 +1,4 @@
 <?php
-/**
- * ventas.php — Registro y consulta de ventas.
- * CORREGIDO v2:
- *  - Crea tabla historial_inventario al inicio (evita SQLSTATE al insertar historial)
- *  - Auto-crea cliente en tabla clientes si no existe (para que aparezca en la pantalla Clientes)
- *  - Descuenta stock correctamente con transacción
- *  - Manejo robusto de errores
- *
- * GET  /ventas.php                       → Ventas de hoy
- * GET  /ventas.php?fecha=YYYY-MM-DD      → Ventas de una fecha
- * GET  /ventas.php?nombre=Juan           → Ventas de un cliente por nombre
- * GET  /ventas.php?cliente_id=UUID       → Ventas de un cliente por ID
- * POST /ventas.php                       → Registrar nueva venta
- */
 
 require_once 'config.php';
 require_method('GET', 'POST', 'DELETE');
@@ -76,6 +62,10 @@ try {
     foreach ([
         "ALTER TABLE ventas ADD COLUMN medida_especial VARCHAR(100) DEFAULT '' AFTER registrada_por",
         "ALTER TABLE ventas ADD COLUMN tipo_reparacion VARCHAR(100) DEFAULT '' AFTER medida_especial",
+        // FIX CRÍTICO: si 'tipo' en historial_inventario es ENUM, convertirlo a VARCHAR(50)
+        "ALTER TABLE historial_inventario MODIFY COLUMN tipo VARCHAR(50) NOT NULL",
+        // FIX CRÍTICO: si 'motivo' en historial_inventario es ENUM, convertirlo a VARCHAR(100)
+        "ALTER TABLE historial_inventario MODIFY COLUMN motivo VARCHAR(100) NOT NULL DEFAULT 'ajuste_manual'",
     ] as $alterSql) {
         try { $db->exec($alterSql); } catch (\Throwable $ignored) {}
     }
@@ -247,8 +237,13 @@ if ($method === 'POST') {
                 $stock_nuevo = max(0, $stock_antes - (int)$item['cantidad']);
                 $stmtUpdate->execute([$stock_nuevo, $item['tipo']]);
                 try {
-                    $stmtHistorial->execute([$item['tipo'], $stock_antes, $stock_nuevo, $venta_id, $registrada_por]);
-                } catch (\Throwable $ignored) {}
+                    // Sanitizar tipo para evitar SQLSTATE 1265 si la columna es ENUM
+                    $tipoHistorial = substr((string)$item['tipo'], 0, 50);
+                    $stmtHistorial->execute([$tipoHistorial, $stock_antes, $stock_nuevo, $venta_id, $registrada_por]);
+                } catch (\Throwable $ignored) {
+                    // El historial nunca debe bloquear la venta
+                    error_log('historial skip: ' . ($ignored->getMessage() ?? ''));
+                }
             }
         }
 
