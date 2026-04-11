@@ -15,7 +15,7 @@
  */
 
 require_once 'config.php';
-require_method('GET', 'POST');
+require_method('GET', 'POST', 'DELETE');
 
 $method = $_SERVER['REQUEST_METHOD'];
 $db     = getDB();
@@ -72,6 +72,13 @@ try {
          WHERE DATE(v.creado_en) = CURDATE()
          GROUP BY v.id
          ORDER BY v.creado_en DESC");
+    // ✅ FIX: Migrar columnas que pueden no existir en tablas ya creadas
+    foreach ([
+        "ALTER TABLE ventas ADD COLUMN medida_especial VARCHAR(100) DEFAULT '' AFTER registrada_por",
+        "ALTER TABLE ventas ADD COLUMN tipo_reparacion VARCHAR(100) DEFAULT '' AFTER medida_especial",
+    ] as $alterSql) {
+        try { $db->exec($alterSql); } catch (\Throwable $ignored) {}
+    }
 } catch (\Throwable $e) { error_log('ventas init: ' . $e->getMessage()); }
 
 // ── GET ───────────────────────────────────────────────────────────────────────
@@ -242,5 +249,36 @@ if ($method === 'POST') {
         $db->rollBack();
         error_log('POST ventas: ' . $e->getMessage());
         json_response(['error' => 'Error al registrar la venta: ' . $e->getMessage()], 500);
+    }
+}
+
+// ── DELETE ────────────────────────────────────────────────────────────────────
+if ($method === 'DELETE') {
+    $venta_id = trim($_GET['id'] ?? '');
+    if (empty($venta_id)) {
+        $data = get_input();
+        $venta_id = trim($data['venta_id'] ?? '');
+    }
+    if (empty($venta_id)) {
+        json_response(['error' => 'id de venta requerido'], 400);
+    }
+    $db->beginTransaction();
+    try {
+        // Restaurar stock
+        $stmtDet  = $db->prepare('SELECT tipo, cantidad FROM detalle_ventas WHERE venta_id = ?');
+        $stmtDet->execute([$venta_id]);
+        $items = $stmtDet->fetchAll();
+        foreach ($items as $item) {
+            $db->prepare('UPDATE inventario SET stock_actual = stock_actual + ?, actualizado_en = NOW() WHERE tipo = ?')
+               ->execute([(int)$item['cantidad'], $item['tipo']]);
+        }
+        $db->prepare('DELETE FROM detalle_ventas WHERE venta_id = ?')->execute([$venta_id]);
+        $db->prepare('DELETE FROM ventas WHERE id = ?')->execute([$venta_id]);
+        $db->commit();
+        json_response(['success' => true]);
+    } catch (\Throwable $e) {
+        $db->rollBack();
+        error_log('DELETE ventas: ' . $e->getMessage());
+        json_response(['error' => 'Error al eliminar la venta: ' . $e->getMessage()], 500);
     }
 }
