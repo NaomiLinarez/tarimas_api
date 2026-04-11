@@ -8,7 +8,7 @@ require_once 'config.php';
 require_method('POST');
 
 $data           = get_input();
-$titulo         = trim($data['titulo']          ?? '🛒 Nuevo pedido');
+$titulo         = trim($data['titulo']          ?? ' Nuevo pedido :)');
 $cuerpo         = trim($data['cuerpo']          ?? 'Se registró un nuevo pedido');
 $ventaId        = trim($data['venta_id']        ?? '');
 $tipo           = trim($data['tipo']            ?? 'nuevo_pedido');
