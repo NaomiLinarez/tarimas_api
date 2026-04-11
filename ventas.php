@@ -235,11 +235,7 @@ if ($method === 'POST') {
 
         $db->commit();
 
-        // Notificar admin (no crítico)
-        try {
-            notificar_admin_nuevo_pedido($db, $venta_id, $nombre_cliente, (float)$total, $metodo_pago, $medida_especial, $tipo_reparacion, $detalle);
-        } catch (\Throwable $e) { error_log('FCM notify: ' . $e->getMessage()); }
-
+        // La notificación al admin la maneja la app directamente vía /notificar_admin.php (FCM V1)
         json_response(['success' => true, 'venta_id' => $venta_id], 201);
 
     } catch (\Throwable $e) {
@@ -247,36 +243,4 @@ if ($method === 'POST') {
         error_log('POST ventas: ' . $e->getMessage());
         json_response(['error' => 'Error al registrar la venta: ' . $e->getMessage()], 500);
     }
-}
-
-function notificar_admin_nuevo_pedido(PDO $db, string $venta_id, string $cliente, float $total, string $metodo, string $medida_especial = '', string $tipo_reparacion = '', array $detalle = []): void {
-    try {
-        $stmt = $db->prepare("SELECT ft.token FROM fcm_tokens ft JOIN usuarios u ON u.id = ft.usuario_id WHERE u.rol = 'admin' AND ft.activo = 1");
-        $stmt->execute();
-        $tokens = $stmt->fetchAll(PDO::FETCH_COLUMN);
-        if (empty($tokens)) return;
-        $serverKey = getenv('FCM_SERVER_KEY');
-        if (!$serverKey) return;
-        $labels = ['tarima_nueva'=>'Tarima nueva','estandar'=>'Estándar','encachetada'=>'Encachetada','barrote'=>'Barrote','tacon'=>'Tacón','especial'=>'Medida especial','reparacion'=>'Reparación'];
-        $lineas = [];
-        foreach ($detalle as $item) {
-            $label = $labels[$item['tipo'] ?? ''] ?? ($item['tipo'] ?? '');
-            $linea = "• {$label}: " . ($item['cantidad'] ?? 0);
-            if (($item['tipo'] ?? '') === 'especial'   && $medida_especial !== '') $linea .= " ({$medida_especial})";
-            if (($item['tipo'] ?? '') === 'reparacion' && $tipo_reparacion !== '') $linea .= " ({$tipo_reparacion})";
-            $lineas[] = $linea;
-        }
-        $monto  = number_format($total, 2);
-        $cuerpo = "Cliente: {$cliente}\nTotal: \${$monto}";
-        if (!empty($lineas)) $cuerpo .= "\n\nPedido:\n" . implode("\n", $lineas);
-        $ch = curl_init('https://fcm.googleapis.com/fcm/send');
-        curl_setopt_array($ch, [
-            CURLOPT_POST        => true,
-            CURLOPT_HTTPHEADER  => ['Content-Type: application/json','Authorization: key='.$serverKey],
-            CURLOPT_POSTFIELDS  => json_encode(['registration_ids'=>$tokens,'notification'=>['title'=>'🛒 Nuevo pedido','body'=>$cuerpo,'sound'=>'default'],'data'=>['tipo'=>'nuevo_pedido','venta_id'=>$venta_id],'priority'=>'high']),
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT     => 5,
-        ]);
-        curl_exec($ch); curl_close($ch);
-    } catch (\Throwable $e) { error_log('FCM: ' . $e->getMessage()); }
 }
