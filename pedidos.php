@@ -39,7 +39,7 @@ if ($method === 'GET') {
 
 if ($method === 'POST') {
     $data           = get_input();
-    $nombre_cliente = mb_convert_case(trim($data['nombre_cliente'] ?? ''), MB_CASE_TITLE, 'UTF-8');
+    $nombre_cliente = trim($data['nombre_cliente'] ?? '');
     $cliente_id     = $data['cliente_id']     ?? null;
     $telefono       = trim($data['telefono']   ?? '');
     $direccion      = trim($data['direccion']  ?? '');

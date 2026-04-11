@@ -118,7 +118,7 @@ if ($method === 'GET') {
 // ── POST ──────────────────────────────────────────────────────────────────────
 if ($method === 'POST') {
     $data            = get_input();
-    $nombre_cliente  = mb_convert_case(trim($data['nombre_cliente'] ?? ''), MB_CASE_TITLE, 'UTF-8');
+    $nombre_cliente  = trim($data['nombre_cliente']  ?? '');
     $cliente_id      = $data['cliente_id']       ?? null;
     $total           = $data['total']            ?? 0;
     $metodo_pago     = $data['metodo_pago']      ?? 'transferencia';
