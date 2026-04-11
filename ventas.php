@@ -1,11 +1,11 @@
 <?php
 /**
  * ventas.php — Registro y consulta de ventas.
- * CORREGIDO:
- *  - Al crear venta, ahora también vincula cliente_id por nombre si no se pasa
+ * CORREGIDO v2:
+ *  - Crea tabla historial_inventario al inicio (evita SQLSTATE al insertar historial)
+ *  - Auto-crea cliente en tabla clientes si no existe (para que aparezca en la pantalla Clientes)
  *  - Descuenta stock correctamente con transacción
- *  - Manejo robusto de errores inesperados
- *  - Crea tablas si no existen
+ *  - Manejo robusto de errores
  *
  * GET  /ventas.php                       → Ventas de hoy
  * GET  /ventas.php?fecha=YYYY-MM-DD      → Ventas de una fecha
@@ -20,7 +20,7 @@ require_method('GET', 'POST');
 $method = $_SERVER['REQUEST_METHOD'];
 $db     = getDB();
 
-// Asegurar tablas
+// ── Asegurar tablas ──────────────────────────────────────────────────────────
 try {
     $db->exec("CREATE TABLE IF NOT EXISTS ventas (
         id               VARCHAR(36) PRIMARY KEY,
@@ -43,7 +43,28 @@ try {
         precio_unit DECIMAL(10,2) NOT NULL DEFAULT 0,
         INDEX idx_venta_id (venta_id)
     )");
-    // Vista para ventas de hoy (recrear si no existe)
+    // ✅ FIX: Crear historial_inventario aquí para evitar SQLSTATE al insertar
+    $db->exec("CREATE TABLE IF NOT EXISTS historial_inventario (
+        id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+        tipo          VARCHAR(50) NOT NULL,
+        stock_antes   INT NOT NULL DEFAULT 0,
+        stock_despues INT NOT NULL DEFAULT 0,
+        motivo        VARCHAR(50) NOT NULL DEFAULT 'ajuste_manual',
+        referencia_id VARCHAR(36) DEFAULT NULL,
+        cambiado_por  VARCHAR(36) DEFAULT NULL,
+        creado_en     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )");
+    // ✅ FIX: Asegurar tabla clientes también
+    $db->exec("CREATE TABLE IF NOT EXISTS clientes (
+        id        VARCHAR(36) PRIMARY KEY,
+        nombre    VARCHAR(150) NOT NULL,
+        telefono  VARCHAR(30)  DEFAULT '',
+        direccion VARCHAR(250) DEFAULT '',
+        notas     TEXT         DEFAULT NULL,
+        activo    TINYINT(1) NOT NULL DEFAULT 1,
+        creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )");
+    // Vista para ventas de hoy
     $db->exec("CREATE OR REPLACE VIEW v_ventas_hoy AS
         SELECT v.*, GROUP_CONCAT(CONCAT(dv.tipo,':',dv.cantidad,':',dv.precio_unit) SEPARATOR '|') AS detalle
           FROM ventas v
@@ -140,14 +161,23 @@ if ($method === 'POST') {
         }
     }
 
-    // Auto-buscar cliente_id si solo viene nombre_cliente
+    // ✅ FIX: Auto-buscar cliente_id por nombre; si no existe, CREAR el cliente
     if (!$cliente_id && $nombre_cliente !== '') {
         try {
             $s = $db->prepare('SELECT id FROM clientes WHERE nombre = ? AND activo = 1 LIMIT 1');
             $s->execute([$nombre_cliente]);
             $row = $s->fetch();
-            if ($row) $cliente_id = $row['id'];
-        } catch (\Throwable $e) {}
+            if ($row) {
+                $cliente_id = $row['id'];
+            } else {
+                // Crear cliente nuevo automáticamente para que aparezca en la pantalla Clientes
+                $cliente_id = uuid4();
+                $db->prepare('INSERT INTO clientes (id, nombre, telefono, direccion, notas) VALUES (?, ?, ?, ?, ?)')
+                   ->execute([$cliente_id, $nombre_cliente, '', '', '']);
+            }
+        } catch (\Throwable $e) {
+            error_log('auto-crear cliente: ' . $e->getMessage());
+        }
     }
 
     // Verificar stock antes de iniciar transacción
@@ -161,7 +191,7 @@ if ($method === 'POST') {
         foreach ($detalle as $item) {
             $stmtCheckStock->execute([$item['tipo']]);
             $row = $stmtCheckStock->fetch();
-            if ($row === false) continue; // tipo no en inventario, se omite
+            if ($row === false) continue;
             $stockDisponible = (int) $row['stock_actual'];
             $cantSolicitada  = (int) $item['cantidad'];
             if ($stockDisponible < $cantSolicitada) {
