@@ -29,18 +29,16 @@ try {
         precio_unit DECIMAL(10,2) NOT NULL DEFAULT 0,
         INDEX idx_venta_id (venta_id)
     )");
-    // ✅ FIX: Crear historial_inventario aquí para evitar SQLSTATE al insertar
     $db->exec("CREATE TABLE IF NOT EXISTS historial_inventario (
         id            BIGINT AUTO_INCREMENT PRIMARY KEY,
         tipo          VARCHAR(50) NOT NULL,
         stock_antes   INT NOT NULL DEFAULT 0,
         stock_despues INT NOT NULL DEFAULT 0,
-        motivo        VARCHAR(50) NOT NULL DEFAULT 'ajuste_manual',
+        motivo        VARCHAR(100) NOT NULL DEFAULT 'ajuste_manual',
         referencia_id VARCHAR(36) DEFAULT NULL,
         cambiado_por  VARCHAR(36) DEFAULT NULL,
         creado_en     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )");
-    // ✅ FIX: Asegurar tabla clientes también
     $db->exec("CREATE TABLE IF NOT EXISTS clientes (
         id        VARCHAR(36) PRIMARY KEY,
         nombre    VARCHAR(150) NOT NULL,
@@ -50,6 +48,12 @@ try {
         activo    TINYINT(1) NOT NULL DEFAULT 1,
         creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )");
+
+    // ✅ FIX CRÍTICO: Convertir ENUM a VARCHAR INMEDIATAMENTE, de forma individual y garantizada
+    // Esto resuelve el SQLSTATE[01000] Warning 1265 Data truncated for column 'tipo'
+    try { $db->exec("ALTER TABLE historial_inventario MODIFY COLUMN tipo VARCHAR(50) NOT NULL"); } catch (\Throwable $e) { error_log('alter tipo: ' . $e->getMessage()); }
+    try { $db->exec("ALTER TABLE historial_inventario MODIFY COLUMN motivo VARCHAR(100) NOT NULL DEFAULT 'ajuste_manual'"); } catch (\Throwable $e) { error_log('alter motivo: ' . $e->getMessage()); }
+
     // Vista para ventas de hoy
     $db->exec("CREATE OR REPLACE VIEW v_ventas_hoy AS
         SELECT v.*, GROUP_CONCAT(CONCAT(dv.tipo,':',dv.cantidad,':',dv.precio_unit) SEPARATOR '|') AS detalle
@@ -58,14 +62,11 @@ try {
          WHERE DATE(v.creado_en) = CURDATE()
          GROUP BY v.id
          ORDER BY v.creado_en DESC");
-    // ✅ FIX: Migrar columnas que pueden no existir en tablas ya creadas
+
+    // Migraciones para columnas opcionales
     foreach ([
         "ALTER TABLE ventas ADD COLUMN medida_especial VARCHAR(100) DEFAULT '' AFTER registrada_por",
         "ALTER TABLE ventas ADD COLUMN tipo_reparacion VARCHAR(100) DEFAULT '' AFTER medida_especial",
-        // FIX CRÍTICO: si 'tipo' en historial_inventario es ENUM, convertirlo a VARCHAR(50)
-        "ALTER TABLE historial_inventario MODIFY COLUMN tipo VARCHAR(50) NOT NULL",
-        // FIX CRÍTICO: si 'motivo' en historial_inventario es ENUM, convertirlo a VARCHAR(100)
-        "ALTER TABLE historial_inventario MODIFY COLUMN motivo VARCHAR(100) NOT NULL DEFAULT 'ajuste_manual'",
     ] as $alterSql) {
         try { $db->exec($alterSql); } catch (\Throwable $ignored) {}
     }
@@ -158,7 +159,7 @@ if ($method === 'POST') {
         }
     }
 
-    // ✅ FIX: Auto-buscar cliente_id por nombre; si no existe, CREAR el cliente
+    // Auto-buscar cliente_id por nombre; si no existe, crear el cliente
     if (!$cliente_id && $nombre_cliente !== '') {
         try {
             $s = $db->prepare('SELECT id FROM clientes WHERE nombre = ? AND activo = 1 LIMIT 1');
@@ -167,7 +168,6 @@ if ($method === 'POST') {
             if ($row) {
                 $cliente_id = $row['id'];
             } else {
-                // Crear cliente nuevo automáticamente para que aparezca en la pantalla Clientes
                 $cliente_id = uuid4();
                 $db->prepare('INSERT INTO clientes (id, nombre, telefono, direccion, notas) VALUES (?, ?, ?, ?, ?)')
                    ->execute([$cliente_id, $nombre_cliente, '', '', '']);
@@ -215,9 +215,9 @@ if ($method === 'POST') {
             if ($colCheck2 && $colCheck2->rowCount() > 0) $colsExist[] = 'tipo_reparacion';
         } catch (\Throwable $ignored) {}
 
-        $cols   = 'id, cliente_id, nombre_cliente, total, metodo_pago, monto_recibido, estado_pago, registrada_por';
+        $cols         = 'id, cliente_id, nombre_cliente, total, metodo_pago, monto_recibido, estado_pago, registrada_por';
         $placeholders = '?, ?, ?, ?, ?, ?, ?, ?';
-        $vals   = [$venta_id, $cliente_id, $nombre_cliente, $total, $metodo_pago, $monto_recibido, $estado_pago, $registrada_por];
+        $vals         = [$venta_id, $cliente_id, $nombre_cliente, $total, $metodo_pago, $monto_recibido, $estado_pago, $registrada_por];
         if (in_array('medida_especial', $colsExist)) { $cols .= ', medida_especial'; $placeholders .= ', ?'; $vals[] = $medida_especial; }
         if (in_array('tipo_reparacion', $colsExist)) { $cols .= ', tipo_reparacion'; $placeholders .= ', ?'; $vals[] = $tipo_reparacion; }
 
@@ -237,19 +237,15 @@ if ($method === 'POST') {
                 $stock_nuevo = max(0, $stock_antes - (int)$item['cantidad']);
                 $stmtUpdate->execute([$stock_nuevo, $item['tipo']]);
                 try {
-                    // Sanitizar tipo para evitar SQLSTATE 1265 si la columna es ENUM
                     $tipoHistorial = substr((string)$item['tipo'], 0, 50);
                     $stmtHistorial->execute([$tipoHistorial, $stock_antes, $stock_nuevo, $venta_id, $registrada_por]);
                 } catch (\Throwable $ignored) {
-                    // El historial nunca debe bloquear la venta
                     error_log('historial skip: ' . ($ignored->getMessage() ?? ''));
                 }
             }
         }
 
         $db->commit();
-
-        // La notificación al admin la maneja la app directamente vía /notificar_admin.php (FCM V1)
         json_response(['success' => true, 'venta_id' => $venta_id], 201);
 
     } catch (\Throwable $e) {
@@ -272,7 +268,7 @@ if ($method === 'DELETE') {
     $db->beginTransaction();
     try {
         // Restaurar stock
-        $stmtDet  = $db->prepare('SELECT tipo, cantidad FROM detalle_ventas WHERE venta_id = ?');
+        $stmtDet = $db->prepare('SELECT tipo, cantidad FROM detalle_ventas WHERE venta_id = ?');
         $stmtDet->execute([$venta_id]);
         $items = $stmtDet->fetchAll();
         foreach ($items as $item) {
