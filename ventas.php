@@ -216,10 +216,22 @@ if ($method === 'POST') {
     try {
         $venta_id = uuid4();
 
-        $db->prepare(
-            'INSERT INTO ventas (id, cliente_id, nombre_cliente, total, metodo_pago, monto_recibido, estado_pago, registrada_por, medida_especial, tipo_reparacion)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        )->execute([$venta_id, $cliente_id, $nombre_cliente, $total, $metodo_pago, $monto_recibido, $estado_pago, $registrada_por, $medida_especial, $tipo_reparacion]);
+        // Detectar qué columnas opcionales existen para no fallar si la DB es antigua
+        $colsExist = [];
+        try {
+            $colCheck = $db->query("SHOW COLUMNS FROM ventas LIKE 'medida_especial'");
+            if ($colCheck && $colCheck->rowCount() > 0) $colsExist[] = 'medida_especial';
+            $colCheck2 = $db->query("SHOW COLUMNS FROM ventas LIKE 'tipo_reparacion'");
+            if ($colCheck2 && $colCheck2->rowCount() > 0) $colsExist[] = 'tipo_reparacion';
+        } catch (\Throwable $ignored) {}
+
+        $cols   = 'id, cliente_id, nombre_cliente, total, metodo_pago, monto_recibido, estado_pago, registrada_por';
+        $placeholders = '?, ?, ?, ?, ?, ?, ?, ?';
+        $vals   = [$venta_id, $cliente_id, $nombre_cliente, $total, $metodo_pago, $monto_recibido, $estado_pago, $registrada_por];
+        if (in_array('medida_especial', $colsExist)) { $cols .= ', medida_especial'; $placeholders .= ', ?'; $vals[] = $medida_especial; }
+        if (in_array('tipo_reparacion', $colsExist)) { $cols .= ', tipo_reparacion'; $placeholders .= ', ?'; $vals[] = $tipo_reparacion; }
+
+        $db->prepare("INSERT INTO ventas ($cols) VALUES ($placeholders)")->execute($vals);
 
         $stmtDetalle   = $db->prepare('INSERT INTO detalle_ventas (venta_id, tipo, cantidad, precio_unit) VALUES (?, ?, ?, ?)');
         $stmtStock     = $db->prepare('SELECT stock_actual FROM inventario WHERE tipo = ?');
