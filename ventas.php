@@ -5,6 +5,7 @@ require_method('GET', 'POST', 'DELETE');
 
 $method = $_SERVER['REQUEST_METHOD'];
 $db     = getDB();
+$db->exec("SET SESSION sql_mode = ''");
 
 // ── Asegurar tablas ──────────────────────────────────────────────────────────
 try {
