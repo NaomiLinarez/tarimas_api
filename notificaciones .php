@@ -18,15 +18,19 @@ $db     = getDB();
 // Asegurar tabla
 try {
     $db->exec("CREATE TABLE IF NOT EXISTS admin_notificaciones (
-        id         CHAR(36)     NOT NULL PRIMARY KEY,
-        tipo       VARCHAR(50)  NOT NULL DEFAULT 'nuevo_pedido',
-        titulo     VARCHAR(200) NOT NULL DEFAULT '',
-        cuerpo     TEXT         NOT NULL,
-        venta_id   VARCHAR(36)  DEFAULT NULL,
-        leida      TINYINT(1)   NOT NULL DEFAULT 0,
-        creado_en  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        id             CHAR(36)     NOT NULL PRIMARY KEY,
+        tipo           VARCHAR(50)  NOT NULL DEFAULT 'nuevo_pedido',
+        titulo         VARCHAR(200) NOT NULL DEFAULT '',
+        cuerpo         TEXT         NOT NULL,
+        venta_id       VARCHAR(36)  DEFAULT NULL,
+        cliente_id     VARCHAR(36)  DEFAULT NULL,
+        nombre_cliente VARCHAR(150) DEFAULT NULL,
+        leida          TINYINT(1)   NOT NULL DEFAULT 0,
+        creado_en      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_leida (leida)
     )");
+    try { $db->exec("ALTER TABLE admin_notificaciones ADD COLUMN cliente_id VARCHAR(36) DEFAULT NULL"); } catch (\Throwable $ignored) {}
+    try { $db->exec("ALTER TABLE admin_notificaciones ADD COLUMN nombre_cliente VARCHAR(150) DEFAULT NULL"); } catch (\Throwable $ignored) {}
 } catch (\Throwable $e) {}
 
 // ── GET ───────────────────────────────────────────────────────────────────────
@@ -47,7 +51,7 @@ if ($method === 'GET') {
     try {
         $limite = max(1, min(200, (int)($_GET['limite'] ?? 50)));
         $stmt = $db->prepare(
-            "SELECT id, tipo, titulo, cuerpo, venta_id, leida, creado_en
+            "SELECT id, tipo, titulo, cuerpo, venta_id, cliente_id, nombre_cliente, leida, creado_en
                FROM admin_notificaciones
               ORDER BY creado_en DESC
               LIMIT ?"
