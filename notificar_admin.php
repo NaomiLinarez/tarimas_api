@@ -8,9 +8,11 @@ require_once 'config.php';
 require_method('POST');
 
 $data           = get_input();
-$titulo         = trim($data['titulo']          ?? ' Nuevo pedido :)');
+$titulo         = trim($data['titulo']          ?? '🛒 Nuevo pedido :)');
 $cuerpo         = trim($data['cuerpo']          ?? 'Se registró un nuevo pedido');
 $ventaId        = trim($data['venta_id']        ?? '');
+$clienteId      = trim($data['cliente_id']      ?? '');
+$nombreCliente  = trim($data['nombre_cliente']  ?? '');
 $tipo           = trim($data['tipo']            ?? 'nuevo_pedido');
 $destino        = trim($data['destino']         ?? 'admin');
 $medidaEspecial = trim($data['medida_especial'] ?? '');
@@ -87,19 +89,24 @@ $tokens = $stmt->fetchAll(PDO::FETCH_COLUMN);
 // ── Guardar notificación en BD (persiste aunque no haya tokens FCM) ───────────
 try {
     $db->exec("CREATE TABLE IF NOT EXISTS admin_notificaciones (
-        id         CHAR(36)     NOT NULL PRIMARY KEY,
-        tipo       VARCHAR(50)  NOT NULL DEFAULT 'nuevo_pedido',
-        titulo     VARCHAR(200) NOT NULL DEFAULT '',
-        cuerpo     TEXT         NOT NULL,
-        venta_id   VARCHAR(36)  DEFAULT NULL,
-        leida      TINYINT(1)   NOT NULL DEFAULT 0,
-        creado_en  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        id             CHAR(36)     NOT NULL PRIMARY KEY,
+        tipo           VARCHAR(50)  NOT NULL DEFAULT 'nuevo_pedido',
+        titulo         VARCHAR(200) NOT NULL DEFAULT '',
+        cuerpo         TEXT         NOT NULL,
+        venta_id       VARCHAR(36)  DEFAULT NULL,
+        cliente_id     VARCHAR(36)  DEFAULT NULL,
+        nombre_cliente VARCHAR(150) DEFAULT NULL,
+        leida          TINYINT(1)   NOT NULL DEFAULT 0,
+        creado_en      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_leida (leida)
     )");
+    // Agregar columnas si la tabla ya existía sin ellas
+    try { $db->exec("ALTER TABLE admin_notificaciones ADD COLUMN cliente_id VARCHAR(36) DEFAULT NULL"); } catch (\Throwable $ignored) {}
+    try { $db->exec("ALTER TABLE admin_notificaciones ADD COLUMN nombre_cliente VARCHAR(150) DEFAULT NULL"); } catch (\Throwable $ignored) {}
     $db->prepare(
-        "INSERT IGNORE INTO admin_notificaciones (id, tipo, titulo, cuerpo, venta_id)
-         VALUES (?, ?, ?, ?, ?)"
-    )->execute([uuid4(), $tipo, $titulo, $cuerpo, $ventaId ?: null]);
+        "INSERT IGNORE INTO admin_notificaciones (id, tipo, titulo, cuerpo, venta_id, cliente_id, nombre_cliente)
+         VALUES (?, ?, ?, ?, ?, ?, ?)"
+    )->execute([uuid4(), $tipo, $titulo, $cuerpo, $ventaId ?: null, $clienteId ?: null, $nombreCliente ?: null]);
 } catch (\Throwable $e) {
     error_log('Guardar admin_notificaciones: ' . $e->getMessage());
 }
@@ -172,8 +179,12 @@ foreach ($tokens as $token) {
             'data' => [
                 'tipo'            => $tipo,
                 'venta_id'        => $ventaId,
+                'cliente_id'      => $clienteId,
+                'nombre_cliente'  => $nombreCliente,
                 'medida_especial' => $medidaEspecial,
                 'tipo_reparacion' => $tipoReparacion,
+                'click_action'    => 'FLUTTER_NOTIFICATION_CLICK',
+                'route'           => '/historial_cliente',
             ],
             'android' => [
                 'priority' => 'high',
@@ -181,6 +192,9 @@ foreach ($tokens as $token) {
                     'sound'        => 'default',
                     'click_action' => 'FLUTTER_NOTIFICATION_CLICK',
                 ],
+            ],
+            'apns' => [
+                'payload' => ['aps' => ['sound' => 'default']],
             ],
         ],
     ]);
