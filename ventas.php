@@ -255,30 +255,104 @@ if ($method === 'POST') {
         json_response(['error' => 'Error al registrar la venta: ' . $e->getMessage()], 500);
     }
 
-    // ── Disparar push FCM al admin (DESPUÉS del commit, antes del json_response) ──
+    // ── Enviar push FCM directo a los admins (sin curl interno) ─────────────
     try {
-        $fcmPayload = json_encode([
-            'titulo'          => 'Nuevo pedido recibido',
-            'cuerpo'          => 'Cliente: ' . $nombre_cliente . ' | $' . number_format((float)$total, 2),
-            'venta_id'        => $venta_id,
-            'tipo'            => 'nuevo_pedido',
-            'destino'         => 'admin',
-            'medida_especial' => $medida_especial,
-            'tipo_reparacion' => $tipo_reparacion,
-        ]);
-        $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-        $host   = $_SERVER['HTTP_HOST'] ?? 'localhost';
-        $ch = curl_init($scheme . '://' . $host . '/notificar_admin.php');
-        curl_setopt_array($ch, [
-            CURLOPT_POST           => true,
-            CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
-            CURLOPT_POSTFIELDS     => $fcmPayload,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 5,
-        ]);
-        curl_exec($ch);
-        curl_close($ch);
-    } catch (\Throwable $ignored) {}
+        $serviceAccountJson = getenv('FCM_SERVICE_ACCOUNT_JSON');
+        if ($serviceAccountJson) {
+            $serviceAccount = json_decode($serviceAccountJson, true);
+            $projectId      = $serviceAccount['project_id'] ?? '';
+
+            if ($projectId && $serviceAccount) {
+                // Tokens FCM de todos los admins activos
+                $stmtTokens = $db->prepare("
+                    SELECT ft.token
+                      FROM fcm_tokens ft
+                      JOIN usuarios u ON u.id = ft.usuario_id
+                     WHERE u.rol = 'admin' AND ft.activo = 1
+                ");
+                $stmtTokens->execute();
+                $fcmTokens = $stmtTokens->fetchAll(PDO::FETCH_COLUMN);
+
+                if (!empty($fcmTokens)) {
+                    // Obtener Access Token OAuth2
+                    $now     = time();
+                    $header  = str_replace(['+','/',  '='], ['-','_',''], base64_encode(json_encode(['alg'=>'RS256','typ'=>'JWT'])));
+                    $payload_jwt = str_replace(['+','/',  '='], ['-','_',''], base64_encode(json_encode([
+                        'iss'   => $serviceAccount['client_email'],
+                        'sub'   => $serviceAccount['client_email'],
+                        'aud'   => 'https://oauth2.googleapis.com/token',
+                        'iat'   => $now,
+                        'exp'   => $now + 3600,
+                        'scope' => 'https://www.googleapis.com/auth/firebase.messaging',
+                    ])));
+                    $sigInput = "$header.$payload_jwt";
+                    openssl_sign($sigInput, $sig, $serviceAccount['private_key'], 'SHA256');
+                    $jwt = $sigInput . '.' . str_replace(['+','/',  '='], ['-','_',''], base64_encode($sig));
+
+                    $chAuth = curl_init('https://oauth2.googleapis.com/token');
+                    curl_setopt_array($chAuth, [
+                        CURLOPT_POST           => true,
+                        CURLOPT_POSTFIELDS     => http_build_query(['grant_type'=>'urn:ietf:params:oauth:grant-type:jwt-bearer','assertion'=>$jwt]),
+                        CURLOPT_RETURNTRANSFER => true,
+                        CURLOPT_TIMEOUT        => 10,
+                    ]);
+                    $authResp    = curl_exec($chAuth);
+                    curl_close($chAuth);
+                    $accessToken = json_decode($authResp, true)['access_token'] ?? '';
+
+                    if ($accessToken) {
+                        $tituloFcm = 'Nuevo pedido recibido';
+                        $cuerpoFcm = 'Cliente: ' . $nombre_cliente . ' | $' . number_format((float)$total, 2) . ' | TRANSFERENCIA';
+                        $fcmUrl    = "https://fcm.googleapis.com/v1/projects/{$projectId}/messages:send";
+
+                        foreach ($fcmTokens as $tkn) {
+                            $body = json_encode([
+                                'message' => [
+                                    'token'        => $tkn,
+                                    'notification' => ['title' => $tituloFcm, 'body' => $cuerpoFcm],
+                                    'data'         => [
+                                        'tipo'            => 'nuevo_pedido',
+                                        'venta_id'        => $venta_id,
+                                        'medida_especial' => $medida_especial,
+                                        'tipo_reparacion' => $tipo_reparacion,
+                                    ],
+                                    'android' => [
+                                        'priority'     => 'high',
+                                        'notification' => ['sound' => 'default'],
+                                    ],
+                                ],
+                            ]);
+                            $chFcm = curl_init($fcmUrl);
+                            curl_setopt_array($chFcm, [
+                                CURLOPT_POST           => true,
+                                CURLOPT_HTTPHEADER     => ['Content-Type: application/json', 'Authorization: Bearer ' . $accessToken],
+                                CURLOPT_POSTFIELDS     => $body,
+                                CURLOPT_RETURNTRANSFER => true,
+                                CURLOPT_TIMEOUT        => 8,
+                            ]);
+                            $fcmResp = curl_exec($chFcm);
+                            $fcmCode = curl_getinfo($chFcm, CURLINFO_HTTP_CODE);
+                            curl_close($chFcm);
+
+                            // Desactivar token inválido
+                            if ($fcmCode !== 200) {
+                                $fcmResult = json_decode($fcmResp, true);
+                                $status    = $fcmResult['error']['status'] ?? '';
+                                if (in_array($status, ['INVALID_ARGUMENT','NOT_FOUND','UNREGISTERED'], true)) {
+                                    try { $db->prepare("UPDATE fcm_tokens SET activo=0 WHERE token=?")->execute([$tkn]); } catch (\Throwable $x) {}
+                                }
+                                error_log("FCM error token=" . substr($tkn,0,20) . " code={$fcmCode} resp={$fcmResp}");
+                            }
+                        }
+                    } else {
+                        error_log('FCM: no se obtuvo access token');
+                    }
+                }
+            }
+        }
+    } catch (\Throwable $e) {
+        error_log('FCM push desde ventas: ' . $e->getMessage());
+    }
 
     json_response(['success' => true, 'venta_id' => $venta_id], 201);
 }
