@@ -6,23 +6,8 @@
  * Body: {
  *   "usuario_id": "uuid",
  *   "token":      "fcm-token-del-dispositivo",
- *   "plataforma": "android"   // android | ios
+ *   "plataforma": "android"
  * }
- *
- * La tabla que necesitas crear en MySQL:
- *
- *   CREATE TABLE fcm_tokens (
- *     id           CHAR(36)     NOT NULL PRIMARY KEY,
- *     usuario_id   CHAR(36)     NOT NULL,
- *     token        TEXT         NOT NULL,
- *     plataforma   VARCHAR(10)  NOT NULL DEFAULT 'android',
- *     activo       TINYINT(1)   NOT NULL DEFAULT 1,
- *     creado_en    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
- *     actualizado  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
- *                               ON UPDATE CURRENT_TIMESTAMP,
- *     UNIQUE KEY uq_token (token(255)),
- *     INDEX idx_usuario (usuario_id)
- *   );
  */
 
 require_once 'config.php';
@@ -33,57 +18,53 @@ $usuario_id = trim($data['usuario_id'] ?? '');
 $token      = trim($data['token']      ?? '');
 $plataforma = trim($data['plataforma'] ?? 'android');
 
-// ── Validaciones ─────────────────────────────────────────────────────────────
-
 if ($usuario_id === '' || $token === '') {
     json_response(['error' => 'usuario_id y token son requeridos'], 400);
 }
-
 if (!in_array($plataforma, ['android', 'ios'], true)) {
     $plataforma = 'android';
 }
 
 $db = getDB();
 
-// Asegurar que la tabla exista con estructura correcta
+// Migrar tabla si le faltan columnas (compatible con estructura antigua de setup_db.php)
 try {
-    $db->exec("CREATE TABLE IF NOT EXISTS fcm_tokens (
-        id          VARCHAR(36)  NOT NULL PRIMARY KEY,
-        usuario_id  VARCHAR(36)  NOT NULL,
-        token       TEXT         NOT NULL,
-        plataforma  VARCHAR(10)  NOT NULL DEFAULT 'android',
-        activo      TINYINT(1)   NOT NULL DEFAULT 1,
-        creado_en   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        actualizado DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY uq_token (token(255)),
-        INDEX idx_usuario (usuario_id)
-    )");
-} catch (\Throwable $ignored) {}
+    $cols = $db->query("SHOW COLUMNS FROM fcm_tokens")->fetchAll(PDO::FETCH_COLUMN);
+    if (!in_array('plataforma', $cols)) {
+        $db->exec("ALTER TABLE fcm_tokens ADD COLUMN plataforma VARCHAR(10) NOT NULL DEFAULT 'android'");
+    }
+    if (!in_array('actualizado', $cols)) {
+        $db->exec("ALTER TABLE fcm_tokens ADD COLUMN actualizado DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+    }
+    // Asegurar que activo exista
+    if (!in_array('activo', $cols)) {
+        $db->exec("ALTER TABLE fcm_tokens ADD COLUMN activo TINYINT(1) NOT NULL DEFAULT 1");
+    }
+} catch (\Throwable $e) {
+    error_log('fcm_tokens migrate: ' . $e->getMessage());
+}
 
-
-// ── Upsert: insertar o actualizar si el token ya existe ──────────────────────
-// Esto maneja el caso donde el mismo dispositivo se re-registra o cambia de usuario.
-
-$stmt = $db->prepare('SELECT id, usuario_id FROM fcm_tokens WHERE token = ? LIMIT 1');
+// Upsert: buscar por token
+$stmt = $db->prepare('SELECT id FROM fcm_tokens WHERE token = ? LIMIT 1');
 $stmt->execute([$token]);
 $existing = $stmt->fetch();
 
 if ($existing) {
-    // Actualizar el usuario asociado al token (puede haber cambiado)
     $db->prepare(
-        'UPDATE fcm_tokens
-            SET usuario_id  = ?,
-                plataforma  = ?,
-                activo      = 1,
-                actualizado = NOW()
-          WHERE token = ?'
+        'UPDATE fcm_tokens SET usuario_id = ?, plataforma = ?, activo = 1 WHERE token = ?'
     )->execute([$usuario_id, $plataforma, $token]);
 } else {
-    // Insertar nuevo token
-    $db->prepare(
-        'INSERT INTO fcm_tokens (id, usuario_id, token, plataforma)
-         VALUES (?, ?, ?, ?)'
-    )->execute([uuid4(), $usuario_id, $token, $plataforma]);
+    // id puede ser BIGINT AUTO_INCREMENT o VARCHAR — insertamos sin id para que funcione en ambos casos
+    try {
+        $db->prepare(
+            'INSERT INTO fcm_tokens (usuario_id, token, plataforma, activo) VALUES (?, ?, ?, 1)'
+        )->execute([$usuario_id, $token, $plataforma]);
+    } catch (\Throwable $e) {
+        // Si falla por id NOT NULL (estructura antigua), intentar con uuid
+        $db->prepare(
+            'INSERT INTO fcm_tokens (id, usuario_id, token, plataforma, activo) VALUES (?, ?, ?, ?, 1)'
+        )->execute([uuid4(), $usuario_id, $token, $plataforma]);
+    }
 }
 
 json_response(['success' => true]);
