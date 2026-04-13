@@ -1,258 +1,334 @@
-<?php
+package com.example.tarmiastovar;
 
-require_once 'config.php';
-require_method('GET', 'POST', 'DELETE');
+import android.content.Intent;
+import android.os.Bundle;
+import android.view.View;
+import android.widget.Button;
+import android.widget.TextView;
+import android.widget.Toast;
+import androidx.appcompat.app.AppCompatActivity;
+import com.google.android.material.appbar.MaterialToolbar;
+import com.google.android.material.textfield.TextInputEditText;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import java.util.Locale;
 
-$method = $_SERVER['REQUEST_METHOD'];
-$db     = getDB();
-$db->exec("SET SESSION sql_mode = ''");
+public class ActivityCobro extends AppCompatActivity {
 
-// ── Asegurar tablas ──────────────────────────────────────────────────────────
-try {
-    $db->exec("CREATE TABLE IF NOT EXISTS ventas (
-        id               VARCHAR(36) PRIMARY KEY,
-        cliente_id       VARCHAR(36) DEFAULT NULL,
-        nombre_cliente   VARCHAR(150) NOT NULL DEFAULT '',
-        total            DECIMAL(10,2) NOT NULL DEFAULT 0,
-        metodo_pago      VARCHAR(30) NOT NULL DEFAULT 'transferencia',
-        monto_recibido   DECIMAL(10,2) DEFAULT NULL,
-        estado_pago      VARCHAR(20) NOT NULL DEFAULT 'pendiente',
-        registrada_por   VARCHAR(36) DEFAULT NULL,
-        medida_especial  VARCHAR(100) DEFAULT '',
-        tipo_reparacion  VARCHAR(100) DEFAULT '',
-        creado_en        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )");
-    $db->exec("CREATE TABLE IF NOT EXISTS detalle_ventas (
-        id          BIGINT AUTO_INCREMENT PRIMARY KEY,
-        venta_id    VARCHAR(36) NOT NULL,
-        tipo        VARCHAR(50) NOT NULL,
-        cantidad    INT NOT NULL DEFAULT 1,
-        precio_unit DECIMAL(10,2) NOT NULL DEFAULT 0,
-        INDEX idx_venta_id (venta_id)
-    )");
-    $db->exec("CREATE TABLE IF NOT EXISTS historial_inventario (
-        id            BIGINT AUTO_INCREMENT PRIMARY KEY,
-        tipo          VARCHAR(50) NOT NULL,
-        stock_antes   INT NOT NULL DEFAULT 0,
-        stock_despues INT NOT NULL DEFAULT 0,
-        motivo        VARCHAR(100) NOT NULL DEFAULT 'ajuste_manual',
-        referencia_id VARCHAR(36) DEFAULT NULL,
-        cambiado_por  VARCHAR(36) DEFAULT NULL,
-        creado_en     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )");
-    $db->exec("CREATE TABLE IF NOT EXISTS clientes (
-        id        VARCHAR(36) PRIMARY KEY,
-        nombre    VARCHAR(150) NOT NULL,
-        telefono  VARCHAR(30)  DEFAULT '',
-        direccion VARCHAR(250) DEFAULT '',
-        notas     TEXT         DEFAULT NULL,
-        activo    TINYINT(1) NOT NULL DEFAULT 1,
-        creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )");
-    $db->exec("CREATE OR REPLACE VIEW v_ventas_hoy AS
-        SELECT v.*, GROUP_CONCAT(CONCAT(dv.tipo,':',dv.cantidad,':',dv.precio_unit) SEPARATOR '|') AS detalle
-          FROM ventas v
-          LEFT JOIN detalle_ventas dv ON dv.venta_id = v.id
-         WHERE DATE(v.creado_en) = CURDATE()
-         GROUP BY v.id
-         ORDER BY v.creado_en DESC");
-} catch (\Throwable $e) { error_log('ventas init: ' . $e->getMessage()); }
+    private double totalCobro      = 0;
+    private int    cantNuevas      = 0;
+    private int    cantEstandar    = 0;
+    private int    cantEncachetada = 0;
+    private int    cantBarrote     = 0;
+    private int    cantTacon       = 0;
+    private int    cantRep         = 0;
+    private int    cantEsp         = 0;
 
-// ── GET ───────────────────────────────────────────────────────────────────────
-if ($method === 'GET') {
-    try {
-        $fecha      = $_GET['fecha']      ?? null;
-        $nombre     = trim($_GET['nombre'] ?? '');
-        $cliente_id = trim($_GET['cliente_id'] ?? '');
+    private double precioNueva       = 280.0;
+    private double precioEstandar    = 280.0;
+    private double precioEncachetada = 300.0;
+    private double precioBarrote     = 290.0;
+    private double precioTacon       = 290.0;
+    private double precioRep         = 120.0;
+    private double precioEsp         = 350.0;
 
-        if ($nombre !== '') {
-            $stmt = $db->prepare("
-                SELECT v.*,
-                       GROUP_CONCAT(CONCAT(dv.tipo,':',dv.cantidad,':',dv.precio_unit) SEPARATOR '|') AS detalle
-                  FROM ventas v
-                  LEFT JOIN detalle_ventas dv ON dv.venta_id = v.id
-                 WHERE v.nombre_cliente LIKE ?
-                 GROUP BY v.id ORDER BY v.creado_en DESC LIMIT 100
-            ");
-            $stmt->execute(['%' . $nombre . '%']);
-            json_response($stmt->fetchAll());
+    private String usuarioId = "";
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_cobro);
+
+        totalCobro       = getIntent().getDoubleExtra("total",             0);
+        cantNuevas       = getIntent().getIntExtra("cant_nuevas",          0);
+        cantEstandar     = getIntent().getIntExtra("cant_estandar",        0);
+        cantEncachetada  = getIntent().getIntExtra("cant_encachetada",     0);
+        cantBarrote      = getIntent().getIntExtra("cant_barrote",         0);
+        cantTacon        = getIntent().getIntExtra("cant_tacon",           0);
+        cantRep          = getIntent().getIntExtra("cant_rep",             0);
+        cantEsp          = getIntent().getIntExtra("cant_esp",             0);
+        precioNueva       = getIntent().getDoubleExtra("precio_nueva",      280.0);
+        precioEstandar    = getIntent().getDoubleExtra("precio_estandar",   280.0);
+        precioEncachetada = getIntent().getDoubleExtra("precio_encachetada",300.0);
+        precioBarrote     = getIntent().getDoubleExtra("precio_barrote",    290.0);
+        precioTacon       = getIntent().getDoubleExtra("precio_tacon",      290.0);
+        precioRep         = getIntent().getDoubleExtra("precio_rep",        120.0);
+        precioEsp         = getIntent().getDoubleExtra("precio_esp",        350.0);
+        usuarioId         = getIntent().getStringExtra("usuario_id");
+        if (usuarioId == null) usuarioId = SessionManager.getId(this);
+        if (usuarioId == null) usuarioId = "";
+
+        MaterialToolbar toolbar = (MaterialToolbar) ((com.google.android.material.appbar.AppBarLayout)
+                findViewById(R.id.appbar_cobro)).getChildAt(0);
+        toolbar.setNavigationOnClickListener(v -> onBackPressed());
+
+        setResumenItem(R.id.tv_resumen_nuevas,       cantNuevas);
+        setResumenItem(R.id.tv_resumen_estandar,     cantEstandar);
+        setResumenItem(R.id.tv_resumen_encachetada,  cantEncachetada);
+        setResumenItem(R.id.tv_resumen_barrote,      cantBarrote);
+        setResumenItem(R.id.tv_resumen_tacon,        cantTacon);
+        setResumenItem(R.id.tv_resumen_rep,          cantRep);
+        setResumenItem(R.id.tv_resumen_esp,          cantEsp);
+
+        ocultarSiCero(R.id.row_resumen_nuevas,      cantNuevas);
+        ocultarSiCero(R.id.row_resumen_estandar,    cantEstandar);
+        ocultarSiCero(R.id.row_resumen_encachetada, cantEncachetada);
+        ocultarSiCero(R.id.row_resumen_barrote,     cantBarrote);
+        ocultarSiCero(R.id.row_resumen_tacon,       cantTacon);
+        ocultarSiCero(R.id.row_resumen_rep,         cantRep);
+        ocultarSiCero(R.id.row_resumen_esp,         cantEsp);
+
+        TextView tvTotal = findViewById(R.id.tv_total_cobro);
+        if (tvTotal != null)
+            tvTotal.setText(String.format(Locale.getDefault(), "$%.2f", totalCobro));
+
+        // Aviso de transferencia — sin emojis
+        TextView tvAviso = findViewById(R.id.tv_aviso_pago);
+        if (tvAviso != null) {
+            tvAviso.setVisibility(View.VISIBLE);
+            tvAviso.setText(
+                    "Tu pedido se registra como transferencia bancaria.\n" +
+                            "Se generara un ticket. Llevalo al punto de venta para recoger " +
+                            "tu pedido y realizar el pago indicado.\n\n" +
+                            "IMPORTANTE: Sin ticket no se entrega el pedido."
+            );
         }
 
-        if ($cliente_id !== '') {
-            $stmt = $db->prepare("
-                SELECT v.*,
-                       GROUP_CONCAT(CONCAT(dv.tipo,':',dv.cantidad,':',dv.precio_unit) SEPARATOR '|') AS detalle
-                  FROM ventas v
-                  LEFT JOIN detalle_ventas dv ON dv.venta_id = v.id
-                 WHERE v.cliente_id = ?
-                 GROUP BY v.id ORDER BY v.creado_en DESC LIMIT 100
-            ");
-            $stmt->execute([$cliente_id]);
-            json_response($stmt->fetchAll());
+        // Ocultar botones de metodo de pago (solo transferencia)
+        hideView(R.id.btn_pago_efectivo);
+        hideView(R.id.btn_pago_transferencia);
+        hideView(R.id.btn_pago_credito);
+        hideView(R.id.layout_monto_recibido);
+
+        // Campos condicionales
+        View layoutMedida  = findViewById(R.id.layout_medida_especial);
+        View layoutTipoRep = findViewById(R.id.layout_tipo_reparacion);
+        if (layoutMedida  != null) layoutMedida.setVisibility(cantEsp > 0 ? View.VISIBLE : View.GONE);
+        if (layoutTipoRep != null) layoutTipoRep.setVisibility(cantRep > 0 ? View.VISIBLE : View.GONE);
+
+        // Confirmar pedido
+        Button btnConfirmar = findViewById(R.id.btn_confirmar_cobro);
+        if (btnConfirmar != null) {
+            btnConfirmar.setOnClickListener(v -> {
+
+                // Nombre — obligatorio
+                TextInputEditText etNombre = findViewById(R.id.et_nombre_cliente_cobro);
+                String nombreCliente = (etNombre != null && etNombre.getText() != null)
+                        ? etNombre.getText().toString().trim() : "";
+                if (nombreCliente.isEmpty()) {
+                    if (etNombre != null) etNombre.setError("El nombre es obligatorio");
+                    Toast.makeText(this, "Ingresa el nombre del cliente", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+
+                // Medida especial — obligatorio si cantEsp > 0
+                String medidaEspecial = "";
+                if (cantEsp > 0) {
+                    TextInputEditText etMedida = findViewById(R.id.et_medida_especial);
+                    medidaEspecial = (etMedida != null && etMedida.getText() != null)
+                            ? etMedida.getText().toString().trim() : "";
+                    if (medidaEspecial.isEmpty()) {
+                        if (etMedida != null) etMedida.setError("Especifica la medida requerida");
+                        Toast.makeText(this, "Especifica la medida de la tarima especial", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                }
+
+                // Tipo de reparacion — obligatorio si cantRep > 0
+                String tipoReparacion = "";
+                if (cantRep > 0) {
+                    TextInputEditText etTipoRep = findViewById(R.id.et_tipo_reparacion);
+                    tipoReparacion = (etTipoRep != null && etTipoRep.getText() != null)
+                            ? etTipoRep.getText().toString().trim() : "";
+                    if (tipoReparacion.isEmpty()) {
+                        if (etTipoRep != null) etTipoRep.setError("Indica el tipo de tarima a reparar");
+                        Toast.makeText(this, "Indica el tipo de tarima para reparacion", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                }
+
+                btnConfirmar.setEnabled(false);
+                btnConfirmar.setText("Registrando...");
+
+                String finalNombre  = nombreCliente;
+                String finalMedida  = medidaEspecial;
+                String finalTipoRep = tipoReparacion;
+
+                try {
+                    JSONObject payload = new JSONObject();
+                    payload.put("nombre_cliente",  nombreCliente);
+                    payload.put("total",           totalCobro);
+                    payload.put("metodo_pago",     "transferencia");
+                    payload.put("monto_recibido",  totalCobro);
+                    payload.put("estado_pago",     "pendiente");
+                    if (!medidaEspecial.isEmpty()) payload.put("medida_especial", medidaEspecial);
+                    if (!tipoReparacion.isEmpty()) payload.put("tipo_reparacion", tipoReparacion);
+                    if (!usuarioId.isEmpty())      payload.put("registrada_por",  usuarioId);
+
+                    JSONArray detalle = new JSONArray();
+                    agregarItem(detalle, "tarima_nueva", cantNuevas,      precioNueva,       "");
+                    agregarItem(detalle, "estandar",     cantEstandar,    precioEstandar,    "");
+                    agregarItem(detalle, "encachetada",  cantEncachetada, precioEncachetada, "");
+                    agregarItem(detalle, "barrote",      cantBarrote,     precioBarrote,     "");
+                    agregarItem(detalle, "tacon",        cantTacon,       precioTacon,       "");
+                    agregarItem(detalle, "reparacion",   cantRep,         precioRep,         tipoReparacion);
+                    agregarItem(detalle, "especial",     cantEsp,         precioEsp,         medidaEspecial);
+                    payload.put("detalle", detalle);
+
+                    ApiClient.post("/ventas.php", payload, new ApiClient.Callback() {
+                        @Override
+                        public void onSuccess(JSONObject result) {
+                            String ventaId = result.optString("venta_id", "");
+                            // Enviar notificación y luego ir al ticket dentro del callback
+                            enviarNotificacionAdmin(finalNombre, ventaId, finalMedida, finalTipoRep,
+                                    () -> irAlTicket(finalNombre, ventaId, finalMedida, finalTipoRep));
+                        }
+                        @Override
+                        public void onError(String error) {
+                            runOnUiThread(() -> {
+                                btnConfirmar.setEnabled(true);
+                                btnConfirmar.setText("Confirmar pedido");
+                                new androidx.appcompat.app.AlertDialog.Builder(ActivityCobro.this)
+                                        .setTitle("Error al registrar pedido")
+                                        .setMessage(error)
+                                        .setPositiveButton("OK", null)
+                                        .show();
+                            });
+                        }
+                    });
+
+                } catch (Exception e) {
+                    btnConfirmar.setEnabled(true);
+                    btnConfirmar.setText("Confirmar pedido");
+                    Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                }
+            });
         }
 
-        if ($fecha) {
-            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha)) {
-                json_response(['error' => 'Formato de fecha inválido. Usa YYYY-MM-DD'], 400);
-            }
-            $stmt = $db->prepare("
-                SELECT v.*,
-                       GROUP_CONCAT(CONCAT(dv.tipo,':',dv.cantidad,':',dv.precio_unit) SEPARATOR '|') AS detalle
-                  FROM ventas v
-                  LEFT JOIN detalle_ventas dv ON dv.venta_id = v.id
-                 WHERE DATE(v.creado_en) = ?
-                 GROUP BY v.id ORDER BY v.creado_en DESC
-            ");
-            $stmt->execute([$fecha]);
-        } else {
-            $stmt = $db->query('SELECT * FROM v_ventas_hoy');
-        }
-
-        json_response($stmt->fetchAll());
-    } catch (\Throwable $e) {
-        error_log('GET ventas: ' . $e->getMessage());
-        json_response(['error' => 'Error al obtener ventas: ' . $e->getMessage()], 500);
-    }
-}
-
-// ── POST ──────────────────────────────────────────────────────────────────────
-if ($method === 'POST') {
-    $data            = get_input();
-    $nombre_cliente  = trim($data['nombre_cliente']  ?? '');
-    $cliente_id      = $data['cliente_id']       ?? null;
-    $total           = $data['total']            ?? 0;
-    $metodo_pago     = $data['metodo_pago']      ?? 'transferencia';
-    $monto_recibido  = $data['monto_recibido']   ?? null;
-    $estado_pago     = $data['estado_pago']      ?? 'pendiente';
-    $registrada_por  = $data['registrada_por']   ?? null;
-    $medida_especial = trim($data['medida_especial'] ?? '');
-    $tipo_reparacion = trim($data['tipo_reparacion']  ?? '');
-    $detalle         = $data['detalle']          ?? [];
-
-    if (empty($total) || empty($detalle)) {
-        json_response(['error' => 'total y detalle son requeridos'], 400);
-    }
-    if (!is_array($detalle)) {
-        json_response(['error' => 'detalle debe ser un arreglo'], 400);
-    }
-    if ($nombre_cliente === '') {
-        json_response(['error' => 'nombre_cliente es requerido'], 400);
-    }
-    foreach ($detalle as $i => $item) {
-        if (empty($item['tipo']) || empty($item['cantidad']) || !isset($item['precio_unit'])) {
-            json_response(['error' => "Item $i: tipo, cantidad y precio_unit son requeridos"], 400);
+        Button btnCancelar = findViewById(R.id.btn_cancelar_cobro);
+        if (btnCancelar != null) {
+            btnCancelar.setOnClickListener(v ->
+                    new androidx.appcompat.app.AlertDialog.Builder(this)
+                            .setTitle("Cancelar pedido")
+                            .setMessage("Estas seguro de que deseas cancelar?")
+                            .setPositiveButton("Si, cancelar", (d, w) -> {
+                                Intent intent = new Intent(this, ActivityPresentacion.class);
+                                intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                                startActivity(intent);
+                                finish();
+                            })
+                            .setNegativeButton("No", null)
+                            .show()
+            );
         }
     }
 
-    // Auto-buscar cliente_id por nombre; si no existe, crear el cliente
-    if (!$cliente_id && $nombre_cliente !== '') {
+    // Helpers
+
+    private void setResumenItem(int viewId, int cantidad) {
+        TextView tv = findViewById(viewId);
+        if (tv != null) tv.setText(cantidad + " pzs");
+    }
+
+    private void ocultarSiCero(int rowId, int cantidad) {
+        View row = findViewById(rowId);
+        if (row != null) row.setVisibility(cantidad > 0 ? View.VISIBLE : View.GONE);
+    }
+
+    private void hideView(int id) {
+        View v = findViewById(id);
+        if (v != null) v.setVisibility(View.GONE);
+    }
+
+    private void agregarItem(JSONArray arr, String tipo, int cantidad,
+                             double precio, String extra) {
+        if (cantidad <= 0) return;
         try {
-            $s = $db->prepare('SELECT id FROM clientes WHERE nombre = ? AND activo = 1 LIMIT 1');
-            $s->execute([$nombre_cliente]);
-            $row = $s->fetch();
-            if ($row) {
-                $cliente_id = $row['id'];
-            } else {
-                $cliente_id = uuid4();
-                $db->prepare('INSERT INTO clientes (id, nombre, telefono, direccion, notas) VALUES (?, ?, ?, ?, ?)')
-                   ->execute([$cliente_id, $nombre_cliente, '', '', '']);
+            JSONObject item = new JSONObject();
+            item.put("tipo",        tipo);
+            item.put("cantidad",    cantidad);
+            item.put("precio_unit", precio);
+            if (!extra.isEmpty()) {
+                if (tipo.equals("especial"))   item.put("medida",      extra);
+                if (tipo.equals("reparacion")) item.put("tipo_tarima", extra);
             }
-        } catch (\Throwable $e) {
-            error_log('auto-crear cliente: ' . $e->getMessage());
-        }
+            arr.put(item);
+        } catch (Exception ignored) {}
     }
 
-    // Verificar stock antes de iniciar transacción
-    try {
-        $stmtCheckStock = $db->prepare('SELECT stock_actual FROM inventario WHERE tipo = ?');
-        $labels = [
-            'tarima_nueva' => 'Tarima nueva',
-            'estandar'     => 'Tarima estándar',
-            'encachetada'  => 'Tarima encachetada',
-            'barrote'      => 'Tarima de barrote',
-            'tacon'        => 'Tarima de tacón',
-            'especial'     => 'Medida especial',
-            'reparacion'   => 'Reparación',
-        ];
-        foreach ($detalle as $item) {
-            $stmtCheckStock->execute([$item['tipo']]);
-            $row = $stmtCheckStock->fetch();
-            if ($row === false) continue;
-            $stockDisponible = (int) $row['stock_actual'];
-            $cantSolicitada  = (int) $item['cantidad'];
-            if ($stockDisponible < $cantSolicitada) {
-                $label = $labels[$item['tipo']] ?? $item['tipo'];
-                json_response([
-                    'error' => "Stock insuficiente de {$label}. Disponibles: {$stockDisponible}, solicitados: {$cantSolicitada}"
-                ], 409);
+    private void enviarNotificacionAdmin(String nombreCliente, String ventaId,
+                                         String medidaEsp, String tipoRep,
+                                         Runnable onFinish) {
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("titulo", "Nuevo pedido recibido");
+            String cliente = (nombreCliente != null && !nombreCliente.isEmpty())
+                    ? nombreCliente : "Cliente";
+
+            StringBuilder msg = new StringBuilder();
+            msg.append("Cliente: ").append(cliente)
+                    .append(" | Total: $").append(String.format(Locale.getDefault(), "%.2f", totalCobro))
+                    .append(" | TRANSFERENCIA");
+            if (cantNuevas > 0)       msg.append("\n- Tarima nueva: ").append(cantNuevas);
+            if (cantEstandar > 0)     msg.append("\n- Estandar: ").append(cantEstandar);
+            if (cantEncachetada > 0)  msg.append("\n- Encachetada: ").append(cantEncachetada);
+            if (cantBarrote > 0)      msg.append("\n- Barrote: ").append(cantBarrote);
+            if (cantTacon > 0)        msg.append("\n- Tacon: ").append(cantTacon);
+            if (cantRep > 0) {
+                msg.append("\n- Reparacion: ").append(cantRep);
+                if (!tipoRep.isEmpty()) msg.append(" (").append(tipoRep).append(")");
             }
-        }
-    } catch (\Throwable $e) {
-        json_response(['error' => 'Error al verificar stock: ' . $e->getMessage()], 500);
-    }
-
-    $db->beginTransaction();
-    try {
-        $venta_id = uuid4();
-
-        $db->prepare("
-            INSERT INTO ventas (id, cliente_id, nombre_cliente, total, metodo_pago, monto_recibido, estado_pago, registrada_por, medida_especial, tipo_reparacion)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ")->execute([$venta_id, $cliente_id, $nombre_cliente, $total, $metodo_pago, $monto_recibido, $estado_pago, $registrada_por, $medida_especial, $tipo_reparacion]);
-
-        $stmtDetalle   = $db->prepare('INSERT INTO detalle_ventas (venta_id, tipo, cantidad, precio_unit) VALUES (?, ?, ?, ?)');
-        $stmtStock     = $db->prepare('SELECT stock_actual FROM inventario WHERE tipo = ?');
-        $stmtUpdate    = $db->prepare('UPDATE inventario SET stock_actual = ?, actualizado_en = NOW() WHERE tipo = ?');
-        $stmtHistorial = $db->prepare("INSERT INTO historial_inventario (tipo, stock_antes, stock_despues, motivo, referencia_id, cambiado_por) VALUES (?, ?, ?, 'venta', ?, ?)");
-
-        foreach ($detalle as $item) {
-            $stmtDetalle->execute([$venta_id, $item['tipo'], (int)$item['cantidad'], (float)$item['precio_unit']]);
-            $stmtStock->execute([$item['tipo']]);
-            $stockRow = $stmtStock->fetch();
-            if ($stockRow !== false) {
-                $stock_antes = (int) $stockRow['stock_actual'];
-                $stock_nuevo = max(0, $stock_antes - (int)$item['cantidad']);
-                $stmtUpdate->execute([$stock_nuevo, $item['tipo']]);
-                $stmtHistorial->execute([$item['tipo'], $stock_antes, $stock_nuevo, $venta_id, $registrada_por]);
+            if (cantEsp > 0) {
+                msg.append("\n- Medida especial: ").append(cantEsp);
+                if (!medidaEsp.isEmpty()) msg.append(" - ").append(medidaEsp);
             }
+
+            payload.put("cuerpo",   msg.toString());
+            payload.put("venta_id", ventaId);
+            payload.put("tipo",     "nuevo_pedido");
+            payload.put("destino",  "admin");
+            if (!medidaEsp.isEmpty()) payload.put("medida_especial", medidaEsp);
+            if (!tipoRep.isEmpty())   payload.put("tipo_reparacion", tipoRep);
+
+            ApiClient.post("/notificar_admin.php", payload, new ApiClient.Callback() {
+                @Override public void onSuccess(JSONObject r) {
+                    if (onFinish != null) runOnUiThread(onFinish);
+                }
+                @Override public void onError(String e) {
+                    // Aunque falle el push FCM, igual navegamos al ticket
+                    if (onFinish != null) runOnUiThread(onFinish);
+                }
+            });
+        } catch (Exception e) {
+            // Si hay excepcion construyendo el payload, igual navegamos al ticket
+            if (onFinish != null) runOnUiThread(onFinish);
         }
-
-        $db->commit();
-        json_response(['success' => true, 'venta_id' => $venta_id], 201);
-
-    } catch (\Throwable $e) {
-        $db->rollBack();
-        error_log('POST ventas: ' . $e->getMessage());
-        json_response(['error' => 'Error al registrar la venta: ' . $e->getMessage()], 500);
     }
-}
 
-// ── DELETE ────────────────────────────────────────────────────────────────────
-if ($method === 'DELETE') {
-    $venta_id = trim($_GET['id'] ?? '');
-    if (empty($venta_id)) {
-        $data = get_input();
-        $venta_id = trim($data['venta_id'] ?? '');
-    }
-    if (empty($venta_id)) {
-        json_response(['error' => 'id de venta requerido'], 400);
-    }
-    $db->beginTransaction();
-    try {
-        $stmtDet = $db->prepare('SELECT tipo, cantidad FROM detalle_ventas WHERE venta_id = ?');
-        $stmtDet->execute([$venta_id]);
-        $items = $stmtDet->fetchAll();
-        foreach ($items as $item) {
-            $db->prepare('UPDATE inventario SET stock_actual = stock_actual + ?, actualizado_en = NOW() WHERE tipo = ?')
-               ->execute([(int)$item['cantidad'], $item['tipo']]);
-        }
-        $db->prepare('DELETE FROM detalle_ventas WHERE venta_id = ?')->execute([$venta_id]);
-        $db->prepare('DELETE FROM ventas WHERE id = ?')->execute([$venta_id]);
-        $db->commit();
-        json_response(['success' => true]);
-    } catch (\Throwable $e) {
-        $db->rollBack();
-        error_log('DELETE ventas: ' . $e->getMessage());
-        json_response(['error' => 'Error al eliminar la venta: ' . $e->getMessage()], 500);
+    private void irAlTicket(String nombreCliente, String ventaId,
+                            String medidaEspecial, String tipoReparacion) {
+        Intent intent = new Intent(this, ActivityTicket.class);
+        intent.putExtra("total",             totalCobro);
+        intent.putExtra("cant_nuevas",       cantNuevas);
+        intent.putExtra("cant_estandar",     cantEstandar);
+        intent.putExtra("cant_encachetada",  cantEncachetada);
+        intent.putExtra("cant_barrote",      cantBarrote);
+        intent.putExtra("cant_tacon",        cantTacon);
+        intent.putExtra("cant_rep",          cantRep);
+        intent.putExtra("cant_esp",          cantEsp);
+        intent.putExtra("precio_nueva",      precioNueva);
+        intent.putExtra("precio_estandar",   precioEstandar);
+        intent.putExtra("precio_encachetada",precioEncachetada);
+        intent.putExtra("precio_barrote",    precioBarrote);
+        intent.putExtra("precio_tacon",      precioTacon);
+        intent.putExtra("precio_rep",        precioRep);
+        intent.putExtra("precio_esp",        precioEsp);
+        intent.putExtra("metodo_pago",       "TRANSFERENCIA");
+        intent.putExtra("nombre_cliente",    nombreCliente);
+        intent.putExtra("venta_id",          ventaId);
+        intent.putExtra("medida_especial",   medidaEspecial);
+        intent.putExtra("tipo_reparacion",   tipoReparacion);
+        startActivity(intent);
+        finish();
     }
 }
