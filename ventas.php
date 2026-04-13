@@ -217,14 +217,6 @@ if ($method === 'POST') {
             }
         }
 
-        // Guardar notificacion en BD
-        $tituloNotif = 'Nuevo pedido recibido';
-        $cuerpoNotif = 'Cliente: ' . $nombre_cliente . ' | Total: $' . number_format((float)$total, 2) . ' | TRANSFERENCIA';
-        if (!empty($medida_especial)) $cuerpoNotif .= ' | Medida: ' . $medida_especial;
-        if (!empty($tipo_reparacion)) $cuerpoNotif .= ' | Reparacion: ' . $tipo_reparacion;
-        $db->prepare("INSERT INTO admin_notificaciones (id, tipo, titulo, cuerpo, venta_id) VALUES (?, 'nuevo_pedido', ?, ?, ?)")
-           ->execute([uuid4(), $tituloNotif, $cuerpoNotif, $venta_id]);
-
         $db->commit();
 
     } catch (\Throwable $e) {
@@ -292,16 +284,33 @@ if ($method === 'POST') {
                     }
 
                     if ($at) {
-                        $fcmUrl = "https://fcm.googleapis.com/v1/projects/{$projectId}/messages:send";
-                        $titulo = 'Nuevo pedido recibido';
-                        $cuerpo = 'Cliente: ' . $nombre_cliente . ' | $' . number_format((float)$total, 2) . ' | TRANSFERENCIA';
+                        $fcmUrl      = "https://fcm.googleapis.com/v1/projects/{$projectId}/messages:send";
+                        $tituloNotif = '🛒 Nuevo pedido recibido';
+                        $cuerpoNotif = 'Cliente: ' . $nombre_cliente . ' | $' . number_format((float)$total, 2) . ' | ' . strtoupper($metodo_pago);
+                        if (!empty($medida_especial)) $cuerpoNotif .= ' | Medida: ' . $medida_especial;
+                        if (!empty($tipo_reparacion)) $cuerpoNotif .= ' | Reparación: ' . $tipo_reparacion;
 
                         foreach ($tokens as $tkn) {
                             $msg = json_encode(['message'=>[
                                 'token'        => $tkn,
-                                'notification' => ['title'=>$titulo,'body'=>$cuerpo],
-                                'data'         => ['tipo'=>'nuevo_pedido','venta_id'=>$venta_id,'medida_especial'=>$medida_especial,'tipo_reparacion'=>$tipo_reparacion],
-                                'android'      => ['priority'=>'high','notification'=>['sound'=>'default']],
+                                'notification' => ['title' => $tituloNotif, 'body' => $cuerpoNotif],
+                                'data'         => [
+                                    'tipo'            => 'nuevo_pedido',
+                                    'venta_id'        => $venta_id,
+                                    'cliente_id'      => (string)($cliente_id ?? ''),
+                                    'nombre_cliente'  => $nombre_cliente,
+                                    'medida_especial' => $medida_especial,
+                                    'tipo_reparacion' => $tipo_reparacion,
+                                    'click_action'    => 'FLUTTER_NOTIFICATION_CLICK',
+                                    'route'           => '/historial_cliente',
+                                ],
+                                'android' => [
+                                    'priority'     => 'high',
+                                    'notification' => ['sound' => 'default', 'click_action' => 'FLUTTER_NOTIFICATION_CLICK'],
+                                ],
+                                'apns' => [
+                                    'payload' => ['aps' => ['sound' => 'default']],
+                                ],
                             ]]);
                             $chF = curl_init($fcmUrl);
                             curl_setopt_array($chF, [CURLOPT_POST=>true, CURLOPT_RETURNTRANSFER=>true, CURLOPT_TIMEOUT=>8,
