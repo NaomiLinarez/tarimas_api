@@ -27,14 +27,28 @@ if (!$serviceAccountJson) {
     json_response(['success' => true, 'enviados' => 0, 'mensaje' => 'Notificaciones no configuradas']);
 }
 
-// Las variables de entorno a veces escapan los \n como literales; revertirlos
-$serviceAccountJson = str_replace('\\n', "\n", $serviceAccountJson);
+// Limpiar caracteres de control invisibles que Railway puede insertar
+// (excepto \n \r \t que son válidos dentro del JSON)
+$serviceAccountJson = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $serviceAccountJson);
+// Normalizar: convertir saltos de línea reales dentro de la clave a \n escapados
+// para que json_decode pueda parsear correctamente
+$serviceAccountJson = preg_replace_callback(
+    '/"private_key"\s*:\s*"(.*?)(?<!\\\\)"/s',
+    function ($m) {
+        $key = $m[1];
+        // Reemplazar saltos de línea reales por \n literal para JSON válido
+        $key = str_replace(["\r\n", "\r", "\n"], '\\n', $key);
+        return '"private_key":"' . $key . '"';
+    },
+    $serviceAccountJson
+);
+
 $serviceAccount = json_decode($serviceAccountJson, true);
 if (!$serviceAccount || empty($serviceAccount['private_key']) || empty($serviceAccount['client_email'])) {
-    error_log('FCM_SERVICE_ACCOUNT_JSON inválido: ' . json_last_error_msg());
+    error_log('FCM_SERVICE_ACCOUNT_JSON inválido: ' . json_last_error_msg() . ' | raw: ' . substr($serviceAccountJson, 0, 200));
     json_response(['success' => true, 'enviados' => 0, 'mensaje' => 'Config inválida']);
 }
-// Asegurar que la private_key tenga saltos de línea reales
+// Asegurar que la private_key tenga saltos de línea reales para openssl
 $serviceAccount['private_key'] = str_replace('\\n', "\n", $serviceAccount['private_key']);
 
 $projectId = $serviceAccount['project_id'] ?? '';
