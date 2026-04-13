@@ -237,7 +237,12 @@ if ($method === 'POST') {
     try {
         $svcJson = getenv('FCM_SERVICE_ACCOUNT_JSON');
         if ($svcJson) {
-            $svc       = json_decode($svcJson, true);
+            // Las variables de entorno a veces escapan los \n como literales; revertirlos
+            $svcJson = str_replace('\\n', "\n", $svcJson);
+            $svc = json_decode($svcJson, true);
+            if (!empty($svc['private_key'])) {
+                $svc['private_key'] = str_replace('\\n', "\n", $svc['private_key']);
+            }
             $projectId = $svc['project_id'] ?? '';
             if ($projectId) {
                 // Buscar tokens de admins — compatible con tabla antigua (sin columna activo)
@@ -260,14 +265,22 @@ if ($method === 'POST') {
                         'iat'=>$now,'exp'=>$now+3600,
                         'scope'=>'https://www.googleapis.com/auth/firebase.messaging',
                     ])));
-                    openssl_sign("$hdr.$plj", $sig, $svc['private_key'], 'SHA256');
+                    $sigOk = openssl_sign("$hdr.$plj", $sig, $svc['private_key'], 'SHA256');
+                    if (!$sigOk) {
+                        error_log('FCM: openssl_sign falló — ' . openssl_error_string());
+                        throw new \RuntimeException('openssl_sign falló');
+                    }
                     $jwt = "$hdr.$plj." . str_replace(['+','/','='], ['-','_',''], base64_encode($sig));
 
                     $ch = curl_init('https://oauth2.googleapis.com/token');
                     curl_setopt_array($ch, [CURLOPT_POST=>true, CURLOPT_RETURNTRANSFER=>true, CURLOPT_TIMEOUT=>10,
                         CURLOPT_POSTFIELDS=>http_build_query(['grant_type'=>'urn:ietf:params:oauth:grant-type:jwt-bearer','assertion'=>$jwt])]);
-                    $at = json_decode(curl_exec($ch), true)['access_token'] ?? '';
+                    $tokenResp = curl_exec($ch);
                     curl_close($ch);
+                    $at = json_decode($tokenResp, true)['access_token'] ?? '';
+                    if (!$at) {
+                        error_log('FCM: Google no devolvió access_token — ' . $tokenResp);
+                    }
 
                     if ($at) {
                         $fcmUrl = "https://fcm.googleapis.com/v1/projects/{$projectId}/messages:send";
