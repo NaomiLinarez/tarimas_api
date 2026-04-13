@@ -27,11 +27,15 @@ if (!$serviceAccountJson) {
     json_response(['success' => true, 'enviados' => 0, 'mensaje' => 'Notificaciones no configuradas']);
 }
 
+// Las variables de entorno a veces escapan los \n como literales; revertirlos
+$serviceAccountJson = str_replace('\\n', "\n", $serviceAccountJson);
 $serviceAccount = json_decode($serviceAccountJson, true);
-if (!$serviceAccount) {
-    error_log('FCM_SERVICE_ACCOUNT_JSON inválido');
+if (!$serviceAccount || empty($serviceAccount['private_key']) || empty($serviceAccount['client_email'])) {
+    error_log('FCM_SERVICE_ACCOUNT_JSON inválido: ' . json_last_error_msg());
     json_response(['success' => true, 'enviados' => 0, 'mensaje' => 'Config inválida']);
 }
+// Asegurar que la private_key tenga saltos de línea reales
+$serviceAccount['private_key'] = str_replace('\\n', "\n", $serviceAccount['private_key']);
 
 $projectId = $serviceAccount['project_id'] ?? '';
 if (!$projectId) {
