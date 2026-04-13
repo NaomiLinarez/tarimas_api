@@ -240,8 +240,15 @@ if ($method === 'POST') {
             $svc       = json_decode($svcJson, true);
             $projectId = $svc['project_id'] ?? '';
             if ($projectId) {
-                $stmtTk = $db->prepare("SELECT ft.token FROM fcm_tokens ft JOIN usuarios u ON u.id = ft.usuario_id WHERE u.rol = 'admin' AND ft.activo = 1");
-                $stmtTk->execute();
+                // Buscar tokens de admins — compatible con tabla antigua (sin columna activo)
+                try {
+                    $stmtTk = $db->prepare("SELECT ft.token FROM fcm_tokens ft JOIN usuarios u ON u.id = ft.usuario_id WHERE u.rol = 'admin' AND ft.activo = 1");
+                    $stmtTk->execute();
+                } catch (\Throwable $ignored) {
+                    // Si no existe columna activo, buscar sin ese filtro
+                    $stmtTk = $db->prepare("SELECT ft.token FROM fcm_tokens ft JOIN usuarios u ON u.id = ft.usuario_id WHERE u.rol = 'admin'");
+                    $stmtTk->execute();
+                }
                 $tokens = $stmtTk->fetchAll(PDO::FETCH_COLUMN);
 
                 if (!empty($tokens)) {
