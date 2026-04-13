@@ -1,187 +1,334 @@
-<?php
-/**
- * notificar_admin.php — Envía notificación push FCM V1 a todos los admins.
- * Usa la API V1 (OAuth2 con cuenta de servicio) en lugar de la legacy.
- */
+package com.example.tarmiastovar;
 
-require_once 'config.php';
-require_method('POST');
+import android.content.Intent;
+import android.os.Bundle;
+import android.view.View;
+import android.widget.Button;
+import android.widget.TextView;
+import android.widget.Toast;
+import androidx.appcompat.app.AppCompatActivity;
+import com.google.android.material.appbar.MaterialToolbar;
+import com.google.android.material.textfield.TextInputEditText;
+import org.json.JSONArray;
+import org.json.JSONObject;
+import java.util.Locale;
 
-$data           = get_input();
-$titulo         = trim($data['titulo']          ?? ' Nuevo pedido :)');
-$cuerpo         = trim($data['cuerpo']          ?? 'Se registró un nuevo pedido');
-$ventaId        = trim($data['venta_id']        ?? '');
-$tipo           = trim($data['tipo']            ?? 'nuevo_pedido');
-$destino        = trim($data['destino']         ?? 'admin');
-$medidaEspecial = trim($data['medida_especial'] ?? '');
-$tipoReparacion = trim($data['tipo_reparacion'] ?? '');
+public class ActivityCobro extends AppCompatActivity {
 
-if ($destino !== 'admin') {
-    json_response(['error' => 'destino no válido'], 400);
-}
+    private double totalCobro      = 0;
+    private int    cantNuevas      = 0;
+    private int    cantEstandar    = 0;
+    private int    cantEncachetada = 0;
+    private int    cantBarrote     = 0;
+    private int    cantTacon       = 0;
+    private int    cantRep         = 0;
+    private int    cantEsp         = 0;
 
-// ── Leer cuenta de servicio desde variable de entorno ─────────────────────────
-$serviceAccountJson = getenv('FCM_SERVICE_ACCOUNT_JSON');
-if (!$serviceAccountJson) {
-    error_log('FCM_SERVICE_ACCOUNT_JSON no configurada');
-    json_response(['success' => true, 'enviados' => 0, 'mensaje' => 'Notificaciones no configuradas']);
-}
+    private double precioNueva       = 280.0;
+    private double precioEstandar    = 280.0;
+    private double precioEncachetada = 300.0;
+    private double precioBarrote     = 290.0;
+    private double precioTacon       = 290.0;
+    private double precioRep         = 120.0;
+    private double precioEsp         = 350.0;
 
-$serviceAccount = json_decode($serviceAccountJson, true);
-if (!$serviceAccount) {
-    error_log('FCM_SERVICE_ACCOUNT_JSON inválido');
-    json_response(['success' => true, 'enviados' => 0, 'mensaje' => 'Config inválida']);
-}
+    private String usuarioId = "";
 
-$projectId = $serviceAccount['project_id'] ?? '';
-if (!$projectId) {
-    json_response(['error' => 'project_id no encontrado en la cuenta de servicio'], 500);
-}
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_cobro);
 
-// ── Obtener tokens FCM de todos los admins activos ────────────────────────────
-$db   = getDB();
+        totalCobro       = getIntent().getDoubleExtra("total",             0);
+        cantNuevas       = getIntent().getIntExtra("cant_nuevas",          0);
+        cantEstandar     = getIntent().getIntExtra("cant_estandar",        0);
+        cantEncachetada  = getIntent().getIntExtra("cant_encachetada",     0);
+        cantBarrote      = getIntent().getIntExtra("cant_barrote",         0);
+        cantTacon        = getIntent().getIntExtra("cant_tacon",           0);
+        cantRep          = getIntent().getIntExtra("cant_rep",             0);
+        cantEsp          = getIntent().getIntExtra("cant_esp",             0);
+        precioNueva       = getIntent().getDoubleExtra("precio_nueva",      280.0);
+        precioEstandar    = getIntent().getDoubleExtra("precio_estandar",   280.0);
+        precioEncachetada = getIntent().getDoubleExtra("precio_encachetada",300.0);
+        precioBarrote     = getIntent().getDoubleExtra("precio_barrote",    290.0);
+        precioTacon       = getIntent().getDoubleExtra("precio_tacon",      290.0);
+        precioRep         = getIntent().getDoubleExtra("precio_rep",        120.0);
+        precioEsp         = getIntent().getDoubleExtra("precio_esp",        350.0);
+        usuarioId         = getIntent().getStringExtra("usuario_id");
+        if (usuarioId == null) usuarioId = SessionManager.getId(this);
+        if (usuarioId == null) usuarioId = "";
 
-// Crear tabla si no existe
-try {
-    $db->exec("CREATE TABLE IF NOT EXISTS fcm_tokens (
-        id          CHAR(36)    NOT NULL PRIMARY KEY,
-        usuario_id  CHAR(36)    NOT NULL,
-        token       TEXT        NOT NULL,
-        plataforma  VARCHAR(10) NOT NULL DEFAULT 'android',
-        activo      TINYINT(1)  NOT NULL DEFAULT 1,
-        creado_en   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        actualizado DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        UNIQUE KEY uq_token (token(255)),
-        INDEX idx_usuario (usuario_id)
-    )");
-} catch (\Throwable $e) {}
+        MaterialToolbar toolbar = (MaterialToolbar) ((com.google.android.material.appbar.AppBarLayout)
+                findViewById(R.id.appbar_cobro)).getChildAt(0);
+        toolbar.setNavigationOnClickListener(v -> onBackPressed());
 
-$stmt = $db->prepare("
-    SELECT ft.token
-      FROM fcm_tokens ft
-      JOIN usuarios u ON u.id = ft.usuario_id
-     WHERE u.rol = 'admin'
-       AND ft.activo = 1
-");
-$stmt->execute();
-$tokens = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        setResumenItem(R.id.tv_resumen_nuevas,       cantNuevas);
+        setResumenItem(R.id.tv_resumen_estandar,     cantEstandar);
+        setResumenItem(R.id.tv_resumen_encachetada,  cantEncachetada);
+        setResumenItem(R.id.tv_resumen_barrote,      cantBarrote);
+        setResumenItem(R.id.tv_resumen_tacon,        cantTacon);
+        setResumenItem(R.id.tv_resumen_rep,          cantRep);
+        setResumenItem(R.id.tv_resumen_esp,          cantEsp);
 
-if (empty($tokens)) {
-    json_response(['success' => true, 'enviados' => 0, 'mensaje' => 'Sin admins con token registrado']);
-}
+        ocultarSiCero(R.id.row_resumen_nuevas,      cantNuevas);
+        ocultarSiCero(R.id.row_resumen_estandar,    cantEstandar);
+        ocultarSiCero(R.id.row_resumen_encachetada, cantEncachetada);
+        ocultarSiCero(R.id.row_resumen_barrote,     cantBarrote);
+        ocultarSiCero(R.id.row_resumen_tacon,       cantTacon);
+        ocultarSiCero(R.id.row_resumen_rep,         cantRep);
+        ocultarSiCero(R.id.row_resumen_esp,         cantEsp);
 
-// ── Obtener Access Token OAuth2 ───────────────────────────────────────────────
-function getAccessToken(array $serviceAccount): string {
-    $now = time();
-    $header = base64_encode(json_encode(['alg' => 'RS256', 'typ' => 'JWT']));
-    $payload = base64_encode(json_encode([
-        'iss'   => $serviceAccount['client_email'],
-        'sub'   => $serviceAccount['client_email'],
-        'aud'   => 'https://oauth2.googleapis.com/token',
-        'iat'   => $now,
-        'exp'   => $now + 3600,
-        'scope' => 'https://www.googleapis.com/auth/firebase.messaging',
-    ]));
+        TextView tvTotal = findViewById(R.id.tv_total_cobro);
+        if (tvTotal != null)
+            tvTotal.setText(String.format(Locale.getDefault(), "$%.2f", totalCobro));
 
-    $header  = str_replace(['+', '/', '='], ['-', '_', ''], $header);
-    $payload = str_replace(['+', '/', '='], ['-', '_', ''], $payload);
+        // Aviso de transferencia — sin emojis
+        TextView tvAviso = findViewById(R.id.tv_aviso_pago);
+        if (tvAviso != null) {
+            tvAviso.setVisibility(View.VISIBLE);
+            tvAviso.setText(
+                    "Tu pedido se registra como transferencia bancaria.\n" +
+                            "Se generara un ticket. Llevalo al punto de venta para recoger " +
+                            "tu pedido y realizar el pago indicado.\n\n" +
+                            "IMPORTANTE: Sin ticket no se entrega el pedido."
+            );
+        }
 
-    $signingInput = "$header.$payload";
-    $privateKey   = $serviceAccount['private_key'];
+        // Ocultar botones de metodo de pago (solo transferencia)
+        hideView(R.id.btn_pago_efectivo);
+        hideView(R.id.btn_pago_transferencia);
+        hideView(R.id.btn_pago_credito);
+        hideView(R.id.layout_monto_recibido);
 
-    openssl_sign($signingInput, $signature, $privateKey, 'SHA256');
-    $sig = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($signature));
+        // Campos condicionales
+        View layoutMedida  = findViewById(R.id.layout_medida_especial);
+        View layoutTipoRep = findViewById(R.id.layout_tipo_reparacion);
+        if (layoutMedida  != null) layoutMedida.setVisibility(cantEsp > 0 ? View.VISIBLE : View.GONE);
+        if (layoutTipoRep != null) layoutTipoRep.setVisibility(cantRep > 0 ? View.VISIBLE : View.GONE);
 
-    $jwt = "$signingInput.$sig";
+        // Confirmar pedido
+        Button btnConfirmar = findViewById(R.id.btn_confirmar_cobro);
+        if (btnConfirmar != null) {
+            btnConfirmar.setOnClickListener(v -> {
 
-    // Intercambiar JWT por access token
-    $ch = curl_init('https://oauth2.googleapis.com/token');
-    curl_setopt_array($ch, [
-        CURLOPT_POST           => true,
-        CURLOPT_POSTFIELDS     => http_build_query([
-            'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-            'assertion'  => $jwt,
-        ]),
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT        => 10,
-    ]);
-    $resp = curl_exec($ch);
-    curl_close($ch);
+                // Nombre — obligatorio
+                TextInputEditText etNombre = findViewById(R.id.et_nombre_cliente_cobro);
+                String nombreCliente = (etNombre != null && etNombre.getText() != null)
+                        ? etNombre.getText().toString().trim() : "";
+                if (nombreCliente.isEmpty()) {
+                    if (etNombre != null) etNombre.setError("El nombre es obligatorio");
+                    Toast.makeText(this, "Ingresa el nombre del cliente", Toast.LENGTH_SHORT).show();
+                    return;
+                }
 
-    $data = json_decode($resp, true);
-    return $data['access_token'] ?? '';
-}
+                // Medida especial — obligatorio si cantEsp > 0
+                String medidaEspecial = "";
+                if (cantEsp > 0) {
+                    TextInputEditText etMedida = findViewById(R.id.et_medida_especial);
+                    medidaEspecial = (etMedida != null && etMedida.getText() != null)
+                            ? etMedida.getText().toString().trim() : "";
+                    if (medidaEspecial.isEmpty()) {
+                        if (etMedida != null) etMedida.setError("Especifica la medida requerida");
+                        Toast.makeText(this, "Especifica la medida de la tarima especial", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                }
 
-$accessToken = getAccessToken($serviceAccount);
-if (!$accessToken) {
-    error_log('No se pudo obtener access token de FCM');
-    json_response(['success' => true, 'enviados' => 0, 'mensaje' => 'Error de autenticación FCM']);
-}
+                // Tipo de reparacion — obligatorio si cantRep > 0
+                String tipoReparacion = "";
+                if (cantRep > 0) {
+                    TextInputEditText etTipoRep = findViewById(R.id.et_tipo_reparacion);
+                    tipoReparacion = (etTipoRep != null && etTipoRep.getText() != null)
+                            ? etTipoRep.getText().toString().trim() : "";
+                    if (tipoReparacion.isEmpty()) {
+                        if (etTipoRep != null) etTipoRep.setError("Indica el tipo de tarima a reparar");
+                        Toast.makeText(this, "Indica el tipo de tarima para reparacion", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                }
 
-// ── Enviar notificación a cada token (API V1 — 1 request por token) ───────────
-$enviados = 0;
-$errores  = 0;
-$fcmUrl   = "https://fcm.googleapis.com/v1/projects/{$projectId}/messages:send";
+                btnConfirmar.setEnabled(false);
+                btnConfirmar.setText("Registrando...");
 
-foreach ($tokens as $token) {
-    $body = json_encode([
-        'message' => [
-            'token' => $token,
-            'notification' => [
-                'title' => $titulo,
-                'body'  => $cuerpo,
-            ],
-            'data' => [
-                'tipo'            => $tipo,
-                'venta_id'        => $ventaId,
-                'medida_especial' => $medidaEspecial,
-                'tipo_reparacion' => $tipoReparacion,
-            ],
-            'android' => [
-                'priority' => 'high',
-                'notification' => [
-                    'sound'        => 'default',
-                    'click_action' => 'FLUTTER_NOTIFICATION_CLICK',
-                ],
-            ],
-        ],
-    ]);
+                String finalNombre  = nombreCliente;
+                String finalMedida  = medidaEspecial;
+                String finalTipoRep = tipoReparacion;
 
-    $ch = curl_init($fcmUrl);
-    curl_setopt_array($ch, [
-        CURLOPT_POST           => true,
-        CURLOPT_HTTPHEADER     => [
-            'Content-Type: application/json',
-            'Authorization: Bearer ' . $accessToken,
-        ],
-        CURLOPT_POSTFIELDS     => $body,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT        => 8,
-    ]);
-    $resp     = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
+                try {
+                    JSONObject payload = new JSONObject();
+                    payload.put("nombre_cliente",  nombreCliente);
+                    payload.put("total",           totalCobro);
+                    payload.put("metodo_pago",     "transferencia");
+                    payload.put("monto_recibido",  totalCobro);
+                    payload.put("estado_pago",     "pendiente");
+                    if (!medidaEspecial.isEmpty()) payload.put("medida_especial", medidaEspecial);
+                    if (!tipoReparacion.isEmpty()) payload.put("tipo_reparacion", tipoReparacion);
+                    if (!usuarioId.isEmpty())      payload.put("registrada_por",  usuarioId);
 
-    if ($httpCode === 200) {
-        $enviados++;
-    } else {
-        $errores++;
-        error_log("FCM V1 error token={$token} code={$httpCode} resp={$resp}");
+                    JSONArray detalle = new JSONArray();
+                    agregarItem(detalle, "tarima_nueva", cantNuevas,      precioNueva,       "");
+                    agregarItem(detalle, "estandar",     cantEstandar,    precioEstandar,    "");
+                    agregarItem(detalle, "encachetada",  cantEncachetada, precioEncachetada, "");
+                    agregarItem(detalle, "barrote",      cantBarrote,     precioBarrote,     "");
+                    agregarItem(detalle, "tacon",        cantTacon,       precioTacon,       "");
+                    agregarItem(detalle, "reparacion",   cantRep,         precioRep,         tipoReparacion);
+                    agregarItem(detalle, "especial",     cantEsp,         precioEsp,         medidaEspecial);
+                    payload.put("detalle", detalle);
 
-        // Si el token es inválido, desactivarlo
-        $result = json_decode($resp, true);
-        $status = $result['error']['status'] ?? '';
-        if (in_array($status, ['INVALID_ARGUMENT', 'NOT_FOUND', 'UNREGISTERED'], true)) {
-            try {
-                $db->prepare("UPDATE fcm_tokens SET activo = 0 WHERE token = ?")
-                   ->execute([$token]);
-            } catch (\Throwable $ignored) {}
+                    ApiClient.post("/ventas.php", payload, new ApiClient.Callback() {
+                        @Override
+                        public void onSuccess(JSONObject result) {
+                            String ventaId = result.optString("venta_id", "");
+                            // Enviar notificación y luego ir al ticket dentro del callback
+                            enviarNotificacionAdmin(finalNombre, ventaId, finalMedida, finalTipoRep,
+                                    () -> irAlTicket(finalNombre, ventaId, finalMedida, finalTipoRep));
+                        }
+                        @Override
+                        public void onError(String error) {
+                            runOnUiThread(() -> {
+                                btnConfirmar.setEnabled(true);
+                                btnConfirmar.setText("Confirmar pedido");
+                                new androidx.appcompat.app.AlertDialog.Builder(ActivityCobro.this)
+                                        .setTitle("Error al registrar pedido")
+                                        .setMessage(error)
+                                        .setPositiveButton("OK", null)
+                                        .show();
+                            });
+                        }
+                    });
+
+                } catch (Exception e) {
+                    btnConfirmar.setEnabled(true);
+                    btnConfirmar.setText("Confirmar pedido");
+                    Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
+
+        Button btnCancelar = findViewById(R.id.btn_cancelar_cobro);
+        if (btnCancelar != null) {
+            btnCancelar.setOnClickListener(v ->
+                    new androidx.appcompat.app.AlertDialog.Builder(this)
+                            .setTitle("Cancelar pedido")
+                            .setMessage("Estas seguro de que deseas cancelar?")
+                            .setPositiveButton("Si, cancelar", (d, w) -> {
+                                Intent intent = new Intent(this, ActivityPresentacion.class);
+                                intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                                startActivity(intent);
+                                finish();
+                            })
+                            .setNegativeButton("No", null)
+                            .show()
+            );
         }
     }
-}
 
-json_response([
-    'success'  => true,
-    'enviados' => $enviados,
-    'errores'  => $errores,
-]);
+    // Helpers
+
+    private void setResumenItem(int viewId, int cantidad) {
+        TextView tv = findViewById(viewId);
+        if (tv != null) tv.setText(cantidad + " pzs");
+    }
+
+    private void ocultarSiCero(int rowId, int cantidad) {
+        View row = findViewById(rowId);
+        if (row != null) row.setVisibility(cantidad > 0 ? View.VISIBLE : View.GONE);
+    }
+
+    private void hideView(int id) {
+        View v = findViewById(id);
+        if (v != null) v.setVisibility(View.GONE);
+    }
+
+    private void agregarItem(JSONArray arr, String tipo, int cantidad,
+                             double precio, String extra) {
+        if (cantidad <= 0) return;
+        try {
+            JSONObject item = new JSONObject();
+            item.put("tipo",        tipo);
+            item.put("cantidad",    cantidad);
+            item.put("precio_unit", precio);
+            if (!extra.isEmpty()) {
+                if (tipo.equals("especial"))   item.put("medida",      extra);
+                if (tipo.equals("reparacion")) item.put("tipo_tarima", extra);
+            }
+            arr.put(item);
+        } catch (Exception ignored) {}
+    }
+
+    private void enviarNotificacionAdmin(String nombreCliente, String ventaId,
+                                         String medidaEsp, String tipoRep,
+                                         Runnable onFinish) {
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("titulo", "Nuevo pedido recibido");
+            String cliente = (nombreCliente != null && !nombreCliente.isEmpty())
+                    ? nombreCliente : "Cliente";
+
+            StringBuilder msg = new StringBuilder();
+            msg.append("Cliente: ").append(cliente)
+                    .append(" | Total: $").append(String.format(Locale.getDefault(), "%.2f", totalCobro))
+                    .append(" | TRANSFERENCIA");
+            if (cantNuevas > 0)       msg.append("\n- Tarima nueva: ").append(cantNuevas);
+            if (cantEstandar > 0)     msg.append("\n- Estandar: ").append(cantEstandar);
+            if (cantEncachetada > 0)  msg.append("\n- Encachetada: ").append(cantEncachetada);
+            if (cantBarrote > 0)      msg.append("\n- Barrote: ").append(cantBarrote);
+            if (cantTacon > 0)        msg.append("\n- Tacon: ").append(cantTacon);
+            if (cantRep > 0) {
+                msg.append("\n- Reparacion: ").append(cantRep);
+                if (!tipoRep.isEmpty()) msg.append(" (").append(tipoRep).append(")");
+            }
+            if (cantEsp > 0) {
+                msg.append("\n- Medida especial: ").append(cantEsp);
+                if (!medidaEsp.isEmpty()) msg.append(" - ").append(medidaEsp);
+            }
+
+            payload.put("cuerpo",   msg.toString());
+            payload.put("venta_id", ventaId);
+            payload.put("tipo",     "nuevo_pedido");
+            payload.put("destino",  "admin");
+            if (!medidaEsp.isEmpty()) payload.put("medida_especial", medidaEsp);
+            if (!tipoRep.isEmpty())   payload.put("tipo_reparacion", tipoRep);
+
+            ApiClient.post("/notificar_admin.php", payload, new ApiClient.Callback() {
+                @Override public void onSuccess(JSONObject r) {
+                    if (onFinish != null) runOnUiThread(onFinish);
+                }
+                @Override public void onError(String e) {
+                    // Aunque falle el push FCM, igual navegamos al ticket
+                    if (onFinish != null) runOnUiThread(onFinish);
+                }
+            });
+        } catch (Exception e) {
+            // Si hay excepcion construyendo el payload, igual navegamos al ticket
+            if (onFinish != null) runOnUiThread(onFinish);
+        }
+    }
+
+    private void irAlTicket(String nombreCliente, String ventaId,
+                            String medidaEspecial, String tipoReparacion) {
+        Intent intent = new Intent(this, ActivityTicket.class);
+        intent.putExtra("total",             totalCobro);
+        intent.putExtra("cant_nuevas",       cantNuevas);
+        intent.putExtra("cant_estandar",     cantEstandar);
+        intent.putExtra("cant_encachetada",  cantEncachetada);
+        intent.putExtra("cant_barrote",      cantBarrote);
+        intent.putExtra("cant_tacon",        cantTacon);
+        intent.putExtra("cant_rep",          cantRep);
+        intent.putExtra("cant_esp",          cantEsp);
+        intent.putExtra("precio_nueva",      precioNueva);
+        intent.putExtra("precio_estandar",   precioEstandar);
+        intent.putExtra("precio_encachetada",precioEncachetada);
+        intent.putExtra("precio_barrote",    precioBarrote);
+        intent.putExtra("precio_tacon",      precioTacon);
+        intent.putExtra("precio_rep",        precioRep);
+        intent.putExtra("precio_esp",        precioEsp);
+        intent.putExtra("metodo_pago",       "TRANSFERENCIA");
+        intent.putExtra("nombre_cliente",    nombreCliente);
+        intent.putExtra("venta_id",          ventaId);
+        intent.putExtra("medida_especial",   medidaEspecial);
+        intent.putExtra("tipo_reparacion",   tipoReparacion);
+        startActivity(intent);
+        finish();
+    }
+}
