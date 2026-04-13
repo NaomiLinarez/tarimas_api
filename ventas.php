@@ -237,8 +237,17 @@ if ($method === 'POST') {
     try {
         $svcJson = getenv('FCM_SERVICE_ACCOUNT_JSON');
         if ($svcJson) {
-            // Las variables de entorno a veces escapan los \n como literales; revertirlos
-            $svcJson = str_replace('\\n', "\n", $svcJson);
+            // Limpiar caracteres de control invisibles que Railway puede insertar
+            $svcJson = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $svcJson);
+            // Normalizar saltos de línea reales dentro de la private_key
+            $svcJson = preg_replace_callback(
+                '/"private_key"\s*:\s*"(.*?)(?<!\\\\)"/s',
+                function ($m) {
+                    $key = str_replace(["\r\n", "\r", "\n"], '\\n', $m[1]);
+                    return '"private_key":"' . $key . '"';
+                },
+                $svcJson
+            );
             $svc = json_decode($svcJson, true);
             if (!empty($svc['private_key'])) {
                 $svc['private_key'] = str_replace('\\n', "\n", $svc['private_key']);
